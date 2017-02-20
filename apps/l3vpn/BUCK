@@ -1,0 +1,14 @@
+BUNDLES = [
+    '//apps/l3vpn/yangmodel:onos-apps-l3vpn-yangmodel',
+    '//apps/l3vpn/netl3vpn:onos-apps-l3vpn-netl3vpn',
+]
+
+onos_app (
+    title = 'L3VPN',
+    category = 'L3VPN APP',
+    url = 'http://onosproject.org',
+    included_bundles = BUNDLES,
+    description = 'L3VPN YANG APP.',
+    required_apps = [ 'org.onosproject.yms' ],
+)
+

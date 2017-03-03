@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.onosproject.provider.bgp.topology.impl;
+package org.onosproject.provider.bgp.route.impl;
 
 import org.onosproject.bgp.controller.BgpCfg;
 import org.onosproject.bgp.controller.BgpController;
@@ -34,7 +34,7 @@ import java.util.Set;
 /**
  * Adapter implementation for BGP controller.
  */
-public class BgpControllerAdapter implements BgpController {
+public class BgpRouteControllerAdapter implements BgpController {
     @Override
     public Iterable<BgpPeer> getPeers() {
         // TODO Auto-generated method stub

@@ -20,8 +20,8 @@ import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
-
 import org.onosproject.bgp.controller.BgpCfg;
+import org.onosproject.bgp.controller.BgpController;
 import org.onosproject.bgp.controller.BgpPeerCfg;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
@@ -33,9 +33,8 @@ import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.net.config.basics.SubjectFactories;
 import org.onosproject.net.provider.AbstractProvider;
 import org.onosproject.net.provider.ProviderId;
-import org.onosproject.bgp.controller.BgpController;
-import org.slf4j.Logger;
 import org.osgi.service.component.ComponentContext;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -127,6 +126,7 @@ public class BgpCfgProvider extends AbstractProvider {
         bgpConfig.setHoldTime(config.holdTime());
         bgpConfig.setMaxSession(config.maxSession());
         bgpConfig.setLargeASCapability(config.largeAsCapability());
+        bgpConfig.setEvpnCapability(config.evpnCapability());
 
         if (config.flowSpecCapability() == null) {
             bgpConfig.setFlowSpecCapability(BgpCfg.FlowSpec.NONE);
@@ -181,7 +181,7 @@ public class BgpCfgProvider extends AbstractProvider {
         bgpConfig.setHoldTime(config.holdTime());
         bgpConfig.setMaxSession(config.maxSession());
         bgpConfig.setLargeASCapability(config.largeAsCapability());
-
+        bgpConfig.setEvpnCapability(config.evpnCapability());
         if (config.flowSpecCapability() == null) {
             bgpConfig.setFlowSpecCapability(BgpCfg.FlowSpec.NONE);
         } else {

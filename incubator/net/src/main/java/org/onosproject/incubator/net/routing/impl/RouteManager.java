@@ -25,8 +25,12 @@ import org.apache.felix.scr.annotations.Service;
 import org.onlab.packet.IpAddress;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.event.ListenerService;
-import org.onosproject.incubator.net.routing.NextHopData;
+import org.onosproject.incubator.net.routing.EvpnInstanceRoute;
+import org.onosproject.incubator.net.routing.EvpnRoute;
+import org.onosproject.incubator.net.routing.IpNextHop;
+import org.onosproject.incubator.net.routing.IpRoute;
 import org.onosproject.incubator.net.routing.NextHop;
+import org.onosproject.incubator.net.routing.NextHopData;
 import org.onosproject.incubator.net.routing.ResolvedRoute;
 import org.onosproject.incubator.net.routing.Route;
 import org.onosproject.incubator.net.routing.RouteAdminService;
@@ -36,7 +40,7 @@ import org.onosproject.incubator.net.routing.RouteListener;
 import org.onosproject.incubator.net.routing.RouteService;
 import org.onosproject.incubator.net.routing.RouteStore;
 import org.onosproject.incubator.net.routing.RouteStoreDelegate;
-import org.onosproject.incubator.net.routing.RouteTableId;
+import org.onosproject.incubator.net.routing.RouteTableType;
 import org.onosproject.net.Host;
 import org.onosproject.net.config.ConfigFactory;
 import org.onosproject.net.config.NetworkConfigEvent;
@@ -53,6 +57,7 @@ import javax.annotation.concurrent.GuardedBy;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -127,7 +132,7 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
 
     /**
      * {@inheritDoc}
-     *
+     * <p/>
      * In a departure from other services in ONOS, calling addListener will
      * cause all current routes to be pushed to the listener before any new
      * events are sent. This allows a listener to easily get the exact set of
@@ -144,18 +149,29 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
                 Collection<Route> routes = routeStore.getRoutes(table);
                 if (routes != null) {
                     routes.forEach(route -> {
-                        NextHopData nextHopData = routeStore.getNextHop(route.nextHop());
-                            l.post(new RouteEvent(RouteEvent.Type.ROUTE_ADDED,
-                                    new ResolvedRoute(route, nextHopData.mac(),
-                                            nextHopData.location())));
+                        if (route instanceof IpRoute) {
+                            IpRoute ipRoute = (IpRoute) route;
+                            NextHopData nextHopData = routeStore
+                                    .getNextHop(ipRoute.ipNextHop());
+                            if (nextHopData != null) {
+                                l.post(new RouteEvent(
+                                        RouteEvent.Type.ROUTE_UPDATED,
+                                        new ResolvedRoute(ipRoute,
+                                                          nextHopData.mac(),
+                                                          nextHopData.location())));
+                            }
+
+                        } else if (route instanceof EvpnRoute
+                                | route instanceof EvpnInstanceRoute) {
+                            l.post(new RouteEvent(RouteEvent.Type.ROUTE_UPDATED,
+                                                  route));
+                        }
                     });
                 }
+                listeners.put(listener, l);
+                l.start();
+                log.debug("Route synchronization complete");
             });
-
-            listeners.put(listener, l);
-
-            l.start();
-            log.debug("Route synchronization complete");
         }
     }
 
@@ -182,15 +198,16 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
     }
 
     @Override
-    public Map<RouteTableId, Collection<Route>> getAllRoutes() {
+    public Map<RouteTableType, Collection<Route>> getAllRoutes() {
         return routeStore.getRouteTables().stream()
                 .collect(Collectors.toMap(Function.identity(),
-                        table -> (table == null) ?
-                                 Collections.emptySet() : routeStore.getRoutes(table)));
+                                          table -> (table == null) ?
+                                                  Collections.emptySet() : routeStore
+                                                  .getRoutes(table)));
     }
 
     @Override
-    public Route longestPrefixMatch(IpAddress ip) {
+    public IpRoute longestPrefixMatch(IpAddress ip) {
         return routeStore.longestPrefixMatch(ip);
     }
 
@@ -200,9 +217,15 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
     }
 
     @Override
+    public Collection<Route> getRoutesForNextHop(RouteTableType id,
+                                                 NextHop nextHop) {
+        return routeStore.getRoutesForNextHop(id, nextHop);
+    }
+
+    @Override
     public Set<NextHop> getNextHops() {
         return routeStore.getNextHops().entrySet().stream()
-                .map(entry -> new NextHop(entry.getKey(), entry.getValue()))
+                .map(entry -> new IpNextHop(entry.getKey(), entry.getValue()))
                 .collect(Collectors.toSet());
     }
 
@@ -212,7 +235,9 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
             routes.forEach(route -> {
                 log.debug("Received update {}", route);
                 routeStore.updateRoute(route);
-                resolve(route);
+                if (route instanceof IpRoute) {
+                    resolve((IpRoute) route);
+                }
             });
         }
     }
@@ -227,13 +252,13 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
         }
     }
 
-    private void resolve(Route route) {
+    private void resolve(IpRoute route) {
         // Monitor the IP address for updates of the MAC address
-        hostService.startMonitoringIp(route.nextHop());
+        hostService.startMonitoringIp(route.ipNextHop());
 
-        NextHopData nextHopData = routeStore.getNextHop(route.nextHop());
+        NextHopData nextHopData = routeStore.getNextHop(route.ipNextHop());
         if (nextHopData == null) {
-            Set<Host> hosts = hostService.getHostsByIp(route.nextHop());
+            Set<Host> hosts = hostService.getHostsByIp(route.ipNextHop());
             Optional<Host> host = hosts.stream().findFirst();
             if (host.isPresent()) {
                 nextHopData = NextHopData.fromHost(host.get());
@@ -241,7 +266,7 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
         }
 
         if (nextHopData != null) {
-            routeStore.updateNextHop(route.nextHop(), nextHopData);
+            routeStore.updateNextHop(route.ipNextHop(), nextHopData);
         }
     }
 
@@ -338,17 +363,17 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
         @Override
         public void event(HostEvent event) {
             switch (event.type()) {
-            case HOST_ADDED:
-            case HOST_UPDATED:
-                hostUpdated(event.subject());
-                break;
-            case HOST_REMOVED:
-                hostRemoved(event.subject());
-                break;
-            case HOST_MOVED:
-                break;
-            default:
-                break;
+                case HOST_ADDED:
+                case HOST_UPDATED:
+                    hostUpdated(event.subject());
+                    break;
+                case HOST_REMOVED:
+                    hostRemoved(event.subject());
+                    break;
+                case HOST_MOVED:
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -383,12 +408,34 @@ public class RouteManager implements ListenerService<RouteEvent, RouteListener>,
             log.info("processRouteConfigUpdated {}", event);
             Set<Route> routes = ((RouteConfig) event.config().get()).getRoutes();
             Set<Route> prevRoutes = ((RouteConfig) event.prevConfig().get()).getRoutes();
-            Set<Route> pendingRemove = prevRoutes.stream()
-                    .filter(prevRoute -> routes.stream()
-                            .noneMatch(route -> route.prefix().equals(prevRoute.prefix())))
-                    .collect(Collectors.toSet());
-            Set<Route> pendingUpdate = routes.stream()
-                    .filter(route -> !pendingRemove.contains(route)).collect(Collectors.toSet());
+            Set<Route> pendingRemove = new HashSet<>();
+            Set<Route> pendingUpdate = new HashSet<>();
+            IpRoute ipPrevRoute = null;
+            for (Route prevRoute : prevRoutes) {
+                if (prevRoute instanceof IpRoute) {
+                    ipPrevRoute = (IpRoute) prevRoute;
+                }
+                for (Route route : routes) {
+                    if (route instanceof IpRoute) {
+                        IpRoute ipRoute = (IpRoute) route;
+                        if ((ipPrevRoute != null)
+                                && !ipRoute.prefix().equals(ipPrevRoute.prefix())) {
+                            pendingRemove.add(ipRoute);
+                        }
+                    }
+                }
+            }
+            IpRoute ipRoute = null;
+            for (Route route : routes) {
+                if (route instanceof IpRoute) {
+                    ipRoute = (IpRoute) route;
+                }
+
+                if (!pendingRemove.contains(route)) {
+                    pendingUpdate.add(ipRoute);
+                }
+            }
+
             update(pendingUpdate);
             withdraw(pendingRemove);
         }

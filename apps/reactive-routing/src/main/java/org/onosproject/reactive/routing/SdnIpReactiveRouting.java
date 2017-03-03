@@ -33,7 +33,7 @@ import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.incubator.net.intf.Interface;
 import org.onosproject.incubator.net.intf.InterfaceService;
-import org.onosproject.incubator.net.routing.Route;
+import org.onosproject.incubator.net.routing.IpRoute;
 import org.onosproject.incubator.net.routing.RouteService;
 import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.Host;
@@ -108,7 +108,7 @@ public class SdnIpReactiveRouting {
     public void activate() {
         appId = coreService.registerApplication(APP_NAME);
         intentRequestListener = new ReactiveRoutingFib(appId, hostService,
-                interfaceService, intentSynchronizer);
+                                                       interfaceService, intentSynchronizer);
 
         packetService.addProcessor(processor, PacketProcessor.director(2));
         requestIntercepts();
@@ -159,52 +159,52 @@ public class SdnIpReactiveRouting {
             ConnectPoint srcConnectPoint = pkt.receivedFrom();
 
             switch (EthType.EtherType.lookup(ethPkt.getEtherType())) {
-            case ARP:
-                ARP arpPacket = (ARP) ethPkt.getPayload();
-                Ip4Address targetIpAddress = Ip4Address
-                        .valueOf(arpPacket.getTargetProtocolAddress());
-                // Only when it is an ARP request packet and the target IP
-                // address is a virtual gateway IP address, then it will be
-                // processed.
-                if (arpPacket.getOpCode() == ARP.OP_REQUEST
-                        && config.isVirtualGatewayIpAddress(targetIpAddress)) {
-                    MacAddress gatewayMacAddress =
-                            config.getVirtualGatewayMacAddress();
-                    if (gatewayMacAddress == null) {
-                        break;
+                case ARP:
+                    ARP arpPacket = (ARP) ethPkt.getPayload();
+                    Ip4Address targetIpAddress = Ip4Address
+                            .valueOf(arpPacket.getTargetProtocolAddress());
+                    // Only when it is an ARP request packet and the target IP
+                    // address is a virtual gateway IP address, then it will be
+                    // processed.
+                    if (arpPacket.getOpCode() == ARP.OP_REQUEST
+                            && config.isVirtualGatewayIpAddress(targetIpAddress)) {
+                        MacAddress gatewayMacAddress =
+                                config.getVirtualGatewayMacAddress();
+                        if (gatewayMacAddress == null) {
+                            break;
+                        }
+                        Ethernet eth = ARP.buildArpReply(targetIpAddress,
+                                                         gatewayMacAddress,
+                                                         ethPkt);
+
+                        TrafficTreatment.Builder builder =
+                                DefaultTrafficTreatment.builder();
+                        builder.setOutput(srcConnectPoint.port());
+                        packetService.emit(new DefaultOutboundPacket(
+                                srcConnectPoint.deviceId(),
+                                builder.build(),
+                                ByteBuffer.wrap(eth.serialize())));
                     }
-                    Ethernet eth = ARP.buildArpReply(targetIpAddress,
-                                                     gatewayMacAddress,
-                                                     ethPkt);
+                    break;
+                case IPV4:
+                    // Parse packet
+                    IPv4 ipv4Packet = (IPv4) ethPkt.getPayload();
+                    IpAddress dstIp =
+                            IpAddress.valueOf(ipv4Packet.getDestinationAddress());
+                    IpAddress srcIp =
+                            IpAddress.valueOf(ipv4Packet.getSourceAddress());
+                    MacAddress srcMac = ethPkt.getSourceMAC();
+                    packetReactiveProcessor(dstIp, srcIp, srcConnectPoint, srcMac);
 
-                    TrafficTreatment.Builder builder =
-                            DefaultTrafficTreatment.builder();
-                    builder.setOutput(srcConnectPoint.port());
-                    packetService.emit(new DefaultOutboundPacket(
-                            srcConnectPoint.deviceId(),
-                            builder.build(),
-                            ByteBuffer.wrap(eth.serialize())));
-                }
-                break;
-            case IPV4:
-                // Parse packet
-                IPv4 ipv4Packet = (IPv4) ethPkt.getPayload();
-                IpAddress dstIp =
-                        IpAddress.valueOf(ipv4Packet.getDestinationAddress());
-                IpAddress srcIp =
-                        IpAddress.valueOf(ipv4Packet.getSourceAddress());
-                MacAddress srcMac = ethPkt.getSourceMAC();
-                packetReactiveProcessor(dstIp, srcIp, srcConnectPoint, srcMac);
-
-                // TODO emit packet first or packetReactiveProcessor first
-                ConnectPoint egressConnectPoint = null;
-                egressConnectPoint = getEgressConnectPoint(dstIp);
-                if (egressConnectPoint != null) {
-                    forwardPacketToDst(context, egressConnectPoint);
-                }
-                break;
-            default:
-                break;
+                    // TODO emit packet first or packetReactiveProcessor first
+                    ConnectPoint egressConnectPoint = null;
+                    egressConnectPoint = getEgressConnectPoint(dstIp);
+                    if (egressConnectPoint != null) {
+                        forwardPacketToDst(context, egressConnectPoint);
+                    }
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -212,15 +212,15 @@ public class SdnIpReactiveRouting {
     /**
      * Routes packet reactively.
      *
-     * @param dstIpAddress the destination IP address of a packet
-     * @param srcIpAddress the source IP address of a packet
+     * @param dstIpAddress    the destination IP address of a packet
+     * @param srcIpAddress    the source IP address of a packet
      * @param srcConnectPoint the connect point where a packet comes from
-     * @param srcMacAddress the source MAC address of a packet
+     * @param srcMacAddress   the source MAC address of a packet
      */
     private void packetReactiveProcessor(IpAddress dstIpAddress,
-                                        IpAddress srcIpAddress,
-                                        ConnectPoint srcConnectPoint,
-                                        MacAddress srcMacAddress) {
+                                         IpAddress srcIpAddress,
+                                         ConnectPoint srcConnectPoint,
+                                         MacAddress srcMacAddress) {
         checkNotNull(dstIpAddress);
         checkNotNull(srcIpAddress);
         checkNotNull(srcConnectPoint);
@@ -230,14 +230,14 @@ public class SdnIpReactiveRouting {
         // Step1: Try to update the existing intent first if it exists.
         //
         IpPrefix ipPrefix = null;
-        Route route = null;
+        IpRoute route = null;
         if (config.isIpAddressLocal(dstIpAddress)) {
             if (dstIpAddress.isIp4()) {
                 ipPrefix = IpPrefix.valueOf(dstIpAddress,
-                        Ip4Address.BIT_LENGTH);
+                                            Ip4Address.BIT_LENGTH);
             } else {
                 ipPrefix = IpPrefix.valueOf(dstIpAddress,
-                        Ip6Address.BIT_LENGTH);
+                                            Ip6Address.BIT_LENGTH);
             }
         } else {
             // Get IP prefix from BGP route table
@@ -249,7 +249,7 @@ public class SdnIpReactiveRouting {
         if (ipPrefix != null
                 && intentRequestListener.mp2pIntentExists(ipPrefix)) {
             intentRequestListener.updateExistingMp2pIntent(ipPrefix,
-                    srcConnectPoint);
+                                                           srcConnectPoint);
             return;
         }
 
@@ -262,32 +262,32 @@ public class SdnIpReactiveRouting {
                 trafficTypeClassifier(srcConnectPoint, dstIpAddress);
 
         switch (trafficType) {
-        case HOST_TO_INTERNET:
-            // If the destination IP address is outside the local SDN network.
-            // The Step 1 has already handled it. We do not need to do anything here.
-            intentRequestListener.setUpConnectivityHostToInternet(srcIpAddress,
-                    ipPrefix, route.nextHop());
-            break;
-        case INTERNET_TO_HOST:
-            intentRequestListener.setUpConnectivityInternetToHost(dstIpAddress);
-            break;
-        case HOST_TO_HOST:
-            intentRequestListener.setUpConnectivityHostToHost(dstIpAddress,
-                    srcIpAddress, srcMacAddress, srcConnectPoint);
-            break;
-        case INTERNET_TO_INTERNET:
-            log.trace("This is transit traffic, "
-                    + "the intent should be preinstalled already");
-            break;
-        case DROP:
-            // TODO here should setUpDropPacketIntent(...);
-            // We need a new type of intent here.
-            break;
-        case UNKNOWN:
-            log.trace("This is unknown traffic, so we do nothing");
-            break;
-        default:
-            break;
+            case HOST_TO_INTERNET:
+                // If the destination IP address is outside the local SDN network.
+                // The Step 1 has already handled it. We do not need to do anything here.
+                intentRequestListener.setUpConnectivityHostToInternet(srcIpAddress,
+                                                                      ipPrefix, route.ipNextHop());
+                break;
+            case INTERNET_TO_HOST:
+                intentRequestListener.setUpConnectivityInternetToHost(dstIpAddress);
+                break;
+            case HOST_TO_HOST:
+                intentRequestListener.setUpConnectivityHostToHost(dstIpAddress,
+                                                                  srcIpAddress, srcMacAddress, srcConnectPoint);
+                break;
+            case INTERNET_TO_INTERNET:
+                log.trace("This is transit traffic, "
+                                  + "the intent should be preinstalled already");
+                break;
+            case DROP:
+                // TODO here should setUpDropPacketIntent(...);
+                // We need a new type of intent here.
+                break;
+            case UNKNOWN:
+                log.trace("This is unknown traffic, so we do nothing");
+                break;
+            default:
+                break;
         }
     }
 
@@ -295,7 +295,7 @@ public class SdnIpReactiveRouting {
      * Classifies the traffic and return the traffic type.
      *
      * @param srcConnectPoint the connect point where the packet comes from
-     * @param dstIp the destination IP address in packet
+     * @param dstIp           the destination IP address in packet
      * @return the traffic type which this packet belongs to
      */
     private TrafficType trafficTypeClassifier(ConnectPoint srcConnectPoint,
@@ -307,30 +307,29 @@ public class SdnIpReactiveRouting {
         Set<ConnectPoint> bgpPeerConnectPoints = config.getBgpPeerConnectPoints();
 
 
-
         switch (dstIpLocationType) {
-        case INTERNET:
-            if (srcInterface.isPresent() &&
-                    (!bgpPeerConnectPoints.contains(srcConnectPoint))) {
-                return TrafficType.HOST_TO_INTERNET;
-            } else {
-                return TrafficType.INTERNET_TO_INTERNET;
-            }
-        case LOCAL:
-            if (srcInterface.isPresent() &&
-                    (!bgpPeerConnectPoints.contains(srcConnectPoint))) {
-                return TrafficType.HOST_TO_HOST;
-            } else {
-                // TODO Currently we only consider local public prefixes.
-                // In the future, we will consider the local private prefixes.
-                // If dstIpLocationType is a local private, we should return
-                // TrafficType.DROP.
-                return TrafficType.INTERNET_TO_HOST;
-            }
-        case NO_ROUTE:
-            return TrafficType.DROP;
-        default:
-            return TrafficType.UNKNOWN;
+            case INTERNET:
+                if (srcInterface.isPresent() &&
+                        (!bgpPeerConnectPoints.contains(srcConnectPoint))) {
+                    return TrafficType.HOST_TO_INTERNET;
+                } else {
+                    return TrafficType.INTERNET_TO_INTERNET;
+                }
+            case LOCAL:
+                if (srcInterface.isPresent() &&
+                        (!bgpPeerConnectPoints.contains(srcConnectPoint))) {
+                    return TrafficType.HOST_TO_HOST;
+                } else {
+                    // TODO Currently we only consider local public prefixes.
+                    // In the future, we will consider the local private prefixes.
+                    // If dstIpLocationType is a local private, we should return
+                    // TrafficType.DROP.
+                    return TrafficType.INTERNET_TO_HOST;
+                }
+            case NO_ROUTE:
+                return TrafficType.DROP;
+            default:
+                return TrafficType.UNKNOWN;
         }
     }
 
@@ -362,9 +361,9 @@ public class SdnIpReactiveRouting {
             }
         } else if (type == LocationType.INTERNET) {
             IpAddress nextHopIpAddress = null;
-            Route route = routeService.longestPrefixMatch(dstIpAddress);
+            IpRoute route = routeService.longestPrefixMatch(dstIpAddress);
             if (route != null) {
-                nextHopIpAddress = route.nextHop();
+                nextHopIpAddress = route.ipNextHop();
                 Interface it = interfaceService.getMatchingInterface(nextHopIpAddress);
                 if (it != null) {
                     return it.connectPoint();

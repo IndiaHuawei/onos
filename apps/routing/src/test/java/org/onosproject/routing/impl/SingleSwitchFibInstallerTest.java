@@ -166,13 +166,13 @@ public class SingleSwitchFibInstallerTest {
 
         // Interface with no VLAN
         Interface sw1Eth1 = new Interface("intf1", SW1_ETH1,
-                Collections.singletonList(INTF1), MAC1, VlanId.NONE);
+                                          Collections.singletonList(INTF1), MAC1, VlanId.NONE);
         expect(interfaceService.getMatchingInterface(NEXT_HOP1)).andReturn(sw1Eth1);
         interfaces.add(sw1Eth1);
 
         // Interface with a VLAN
         Interface sw2Eth1 = new Interface("intf2", SW1_ETH2,
-                Collections.singletonList(INTF2), MAC2, VLAN1);
+                                          Collections.singletonList(INTF2), MAC2, VLAN1);
         expect(interfaceService.getMatchingInterface(NEXT_HOP2)).andReturn(sw2Eth1);
         interfaces.add(sw2Eth1);
 
@@ -187,7 +187,7 @@ public class SingleSwitchFibInstallerTest {
     private void setUpNetworkConfigService() {
         expect(networkConfigService.getConfig(
                 anyObject(ApplicationId.class), eq(RoutingService.ROUTER_CONFIG_CLASS))).
-        andReturn(routerConfig);
+                andReturn(routerConfig);
         replay(networkConfigService);
     }
 
@@ -204,9 +204,9 @@ public class SingleSwitchFibInstallerTest {
      *
      * @param srcMac source MAC address
      * @param dstMac destination MAC address
-     * @param port port number
-     * @param vlan vlan ID
-     * @param add whether to create an add objective or remove objective
+     * @param port   port number
+     * @param vlan   vlan ID
+     * @param add    whether to create an add objective or remove objective
      * @return new next objective
      */
     private NextObjective createNextObjective(MacAddress srcMac,
@@ -220,8 +220,8 @@ public class SingleSwitchFibInstallerTest {
         TrafficSelector.Builder metabuilder = null;
         if (!vlan.equals(VlanId.NONE)) {
             treatment.pushVlan()
-                     .setVlanId(vlan)
-                     .setVlanPcp((byte) 0);
+                    .setVlanId(vlan)
+                    .setVlanPcp((byte) 0);
         } else {
             metabuilder = DefaultTrafficSelector.builder();
             metabuilder.matchVlanId(VlanId.vlanId(SingleSwitchFibInstaller.ASSIGNED_VLAN));
@@ -244,7 +244,7 @@ public class SingleSwitchFibInstallerTest {
      * Creates a new forwarding objective with the given parameters.
      *
      * @param prefix IP prefix
-     * @param add whether to create an add objective or a remove objective
+     * @param add    whether to create an add objective or a remove objective
      * @return new forwarding objective
      */
     private ForwardingObjective createForwardingObjective(IpPrefix prefix,
@@ -273,14 +273,12 @@ public class SingleSwitchFibInstallerTest {
 
     /**
      * Tests adding a route.
-     *
      * We verify that the flowObjectiveService records the correct state and that the
      * correct flow is submitted to the flowObjectiveService.
      */
     @Test
     public void testRouteAdd() {
         ResolvedRoute resolvedRoute = new ResolvedRoute(PREFIX1, NEXT_HOP1, MAC1, SW1_ETH1);
-
         // Create the next objective
         NextObjective nextObjective = createNextObjective(MAC1, MAC1, SW1_ETH1.port(), VlanId.NONE, true);
         flowObjectiveService.next(DEVICE_ID, nextObjective);
@@ -299,7 +297,7 @@ public class SingleSwitchFibInstallerTest {
 
     /**
      * Tests adding a route with to a next hop in a VLAN.
-     *
+     * <p/>
      * We verify that the flowObjectiveService records the correct state and that the
      * correct flowObjectiveService is submitted to the flowObjectiveService.
      */
@@ -325,7 +323,6 @@ public class SingleSwitchFibInstallerTest {
 
     /**
      * Tests updating a route.
-     *
      * We verify that the flowObjectiveService records the correct state and that the
      * correct flow is submitted to the flowObjectiveService.
      */
@@ -356,7 +353,6 @@ public class SingleSwitchFibInstallerTest {
 
     /**
      * Tests deleting a route.
-     *
      * We verify that the flowObjectiveService records the correct state and that the
      * correct flow is withdrawn from the flowObjectiveService.
      */
@@ -415,7 +411,7 @@ public class SingleSwitchFibInstallerTest {
         }
     }
 
-    private class TestDeviceService  extends DeviceServiceAdapter {
+    private class TestDeviceService extends DeviceServiceAdapter {
 
         @Override
         public boolean isAvailable(DeviceId deviceId) {

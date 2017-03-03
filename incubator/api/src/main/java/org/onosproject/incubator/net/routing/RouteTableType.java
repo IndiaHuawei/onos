@@ -17,8 +17,19 @@
 package org.onosproject.incubator.net.routing;
 
 /**
- * Represents about nexthop of particular route.
+ * Represents route table type.
  */
-public interface NextHop {
+public enum RouteTableType {
+    IPV4,
+
+    IPV6,
+
+    EVPN_IPV4,
+
+    EVPN_IPV6,
+
+    L3EVPN_IPV4,
+
+    L3EVPN_IPV6;
 
 }

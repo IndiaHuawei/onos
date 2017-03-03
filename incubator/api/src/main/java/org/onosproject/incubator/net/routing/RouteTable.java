@@ -16,9 +16,38 @@
 
 package org.onosproject.incubator.net.routing;
 
-/**
- * Represents about nexthop of particular route.
- */
-public interface NextHop {
+import java.util.Collection;
 
+/**
+ * Represents route table for update/remove routes.
+ */
+public interface RouteTable {
+    /**
+     * Update the route.
+     *
+     * @param route route
+     */
+    void update(Route route);
+
+    /**
+     * Remove the route.
+     *
+     * @param route route
+     */
+    void remove(Route route);
+
+    /**
+     * Get the the routes.
+     *
+     * @return collection of routes.
+     */
+    Collection<Route> getRoutes();
+
+    /**
+     * Get the routes for next hop.
+     *
+     * @param nextHop next hop
+     * @return collection of routes.
+     */
+    Collection<Route> getRoutesForNextHop(NextHop nextHop);
 }

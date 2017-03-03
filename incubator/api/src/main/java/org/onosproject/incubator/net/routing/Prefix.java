@@ -17,8 +17,8 @@
 package org.onosproject.incubator.net.routing;
 
 /**
- * Represents about nexthop of particular route.
+ * Represents about  prefix of particular route.
  */
-public interface NextHop {
+public interface Prefix {
 
 }

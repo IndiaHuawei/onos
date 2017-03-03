@@ -124,7 +124,7 @@ public class SdnIpFib {
             EncapsulationType encap = encap();
             MultiPointToSinglePointIntent intent =
                     generateRouteIntent(prefix,
-                                        route.nextHop(),
+                                        route.ipNextHop(),
                                         route.nextHopMac(),
                                         encap);
 
@@ -176,13 +176,13 @@ public class SdnIpFib {
                 interfaceService.getMatchingInterface(nextHopIpAddress);
         if (egressInterface == null) {
             log.warn("No outgoing interface found for {}",
-                    nextHopIpAddress);
+                     nextHopIpAddress);
             return null;
         }
         ConnectPoint egressPort = egressInterface.connectPoint();
 
         log.debug("Generating intent for prefix {}, next hop mac {}",
-                prefix, nextHopMacAddress);
+                  prefix, nextHopMacAddress);
 
         Set<FilteredConnectPoint> ingressFilteredCPs = Sets.newHashSet();
 
@@ -217,13 +217,13 @@ public class SdnIpFib {
 
         MultiPointToSinglePointIntent.Builder intentBuilder =
                 MultiPointToSinglePointIntent.builder()
-                                             .appId(appId)
-                                             .key(key)
-                                             .filteredIngressPoints(ingressFilteredCPs)
-                                             .filteredEgressPoint(egressFilteredCP)
-                                             .treatment(treatment.build())
-                                             .priority(priority)
-                                             .constraints(CONSTRAINTS);
+                        .appId(appId)
+                        .key(key)
+                        .filteredIngressPoints(ingressFilteredCPs)
+                        .filteredEgressPoint(egressFilteredCP)
+                        .treatment(treatment.build())
+                        .priority(priority)
+                        .constraints(CONSTRAINTS);
 
         setEncap(intentBuilder, CONSTRAINTS, encap);
 
@@ -288,14 +288,14 @@ public class SdnIpFib {
                         new FilteredConnectPoint(intf.connectPoint(), selector.build());
 
                 if (intent.filteredEgressPoint().equals(removedEgressFilteredCP)) {
-                     // The interface is an egress interface for the intent.
-                     // This intent just lost its head. Remove it and let higher
-                     // layer routing reroute
+                    // The interface is an egress interface for the intent.
+                    // This intent just lost its head. Remove it and let higher
+                    // layer routing reroute
                     intentSynchronizer.withdraw(routeIntents.remove(entry.getKey()));
                 } else {
                     if (intent.filteredIngressPoints().contains(removedIngressFilteredCP)) {
-                         // The FilteredConnectPoint is an ingress
-                         // FilteredConnectPoint for the intent
+                        // The FilteredConnectPoint is an ingress
+                        // FilteredConnectPoint for the intent
                         Set<FilteredConnectPoint> ingressFilteredCPs =
                                 Sets.newHashSet(intent.filteredIngressPoints());
 
@@ -303,8 +303,8 @@ public class SdnIpFib {
                         ingressFilteredCPs.remove(removedIngressFilteredCP);
 
                         if (!ingressFilteredCPs.isEmpty()) {
-                             // There are still ingress points. Create a new
-                             // intent and resubmit
+                            // There are still ingress points. Create a new
+                            // intent and resubmit
                             MultiPointToSinglePointIntent newIntent =
                                     MultiPointToSinglePointIntent.builder(intent)
                                             .filteredIngressPoints(ingressFilteredCPs)
@@ -313,8 +313,8 @@ public class SdnIpFib {
                             routeIntents.put(entry.getKey(), newIntent);
                             intentSynchronizer.submit(newIntent);
                         } else {
-                             // No more ingress FilteredConnectPoint. Withdraw
-                             //the intent
+                            // No more ingress FilteredConnectPoint. Withdraw
+                            //the intent
                             intentSynchronizer.withdraw(routeIntents.remove(entry.getKey()));
                         }
                     }
@@ -394,10 +394,10 @@ public class SdnIpFib {
                 // intent constraints
                 List<Constraint> constraints = intent.constraints();
                 if (!constraints.stream()
-                                .filter(c -> c instanceof EncapsulationConstraint &&
-                                        new EncapsulationConstraint(encap).equals(c))
-                                .findAny()
-                                .isPresent()) {
+                        .filter(c -> c instanceof EncapsulationConstraint &&
+                                new EncapsulationConstraint(encap).equals(c))
+                        .findAny()
+                        .isPresent()) {
                     MultiPointToSinglePointIntent.Builder intentBuilder =
                             MultiPointToSinglePointIntent.builder(intent);
 
@@ -418,9 +418,9 @@ public class SdnIpFib {
     /**
      * Sets an encapsulation constraint to the intent builder given.
      *
-     * @param builder the intent builder
+     * @param builder     the intent builder
      * @param constraints the existing intent constraints
-     * @param encap the encapsulation type to be set
+     * @param encap       the encapsulation type to be set
      */
     private static void setEncap(ConnectivityIntent.Builder builder,
                                  List<Constraint> constraints,
@@ -459,16 +459,18 @@ public class SdnIpFib {
     private class InternalRouteListener implements RouteListener {
         @Override
         public void event(RouteEvent event) {
-            switch (event.type()) {
-            case ROUTE_ADDED:
-            case ROUTE_UPDATED:
-                update(event.subject());
-                break;
-            case ROUTE_REMOVED:
-                withdraw(event.subject());
-                break;
-            default:
-                break;
+            if (event.subject() instanceof ResolvedRoute) {
+                switch (event.type()) {
+                    case ROUTE_ADDED:
+                    case ROUTE_UPDATED:
+                        update((ResolvedRoute) event.subject());
+                        break;
+                    case ROUTE_REMOVED:
+                        withdraw((ResolvedRoute) event.subject());
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     }
@@ -498,18 +500,18 @@ public class SdnIpFib {
         @Override
         public void event(InterfaceEvent event) {
             switch (event.type()) {
-            case INTERFACE_ADDED:
-                addInterface(event.subject());
-                break;
-            case INTERFACE_UPDATED:
-                removeInterface(event.prevSubject());
-                addInterface(event.subject());
-                break;
-            case INTERFACE_REMOVED:
-                removeInterface(event.subject());
-                break;
-            default:
-                break;
+                case INTERFACE_ADDED:
+                    addInterface(event.subject());
+                    break;
+                case INTERFACE_UPDATED:
+                    removeInterface(event.prevSubject());
+                    addInterface(event.subject());
+                    break;
+                case INTERFACE_REMOVED:
+                    removeInterface(event.subject());
+                    break;
+                default:
+                    break;
             }
         }
     }

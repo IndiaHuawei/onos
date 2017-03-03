@@ -16,6 +16,7 @@
 package org.onosproject.routing.bgp;
 
 import org.onlab.packet.IpPrefix;
+import org.onosproject.incubator.net.routing.IpRoute;
 import org.onosproject.incubator.net.routing.Route;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +29,7 @@ import java.util.LinkedList;
  */
 class BgpRouteSelector {
     private static final Logger log =
-        LoggerFactory.getLogger(BgpRouteSelector.class);
+            LoggerFactory.getLogger(BgpRouteSelector.class);
 
     private BgpSessionManager bgpSessionManager;
 
@@ -45,12 +46,12 @@ class BgpRouteSelector {
      * Processes route entry updates: added/updated and deleted route
      * entries.
      *
-     * @param addedBgpRouteEntries the added/updated route entries to process
+     * @param addedBgpRouteEntries   the added/updated route entries to process
      * @param deletedBgpRouteEntries the deleted route entries to process
      */
     synchronized void routeUpdates(
-                        Collection<BgpRouteEntry> addedBgpRouteEntries,
-                        Collection<BgpRouteEntry> deletedBgpRouteEntries) {
+            Collection<BgpRouteEntry> addedBgpRouteEntries,
+            Collection<BgpRouteEntry> deletedBgpRouteEntries) {
 
         Collection<Route> updates = new LinkedList<>();
         Collection<Route> withdraws = new LinkedList<>();
@@ -80,8 +81,8 @@ class BgpRouteSelector {
                                            Collection<Route> updates,
                                            Collection<Route> withdraws) {
         if (routeUpdate != null) {
-            Route route = new Route(Route.Source.BGP, routeUpdate.routeEntry().prefix(),
-                    routeUpdate.routeEntry().nextHop());
+            IpRoute route = new IpRoute(IpRoute.Source.BGP, routeUpdate.routeEntry().prefix(),
+                                        routeUpdate.routeEntry().nextHop());
             if (routeUpdate.type().equals(RouteUpdate.Type.UPDATE)) {
                 updates.add(route);
             } else if (routeUpdate.type().equals(RouteUpdate.Type.DELETE)) {
@@ -100,17 +101,17 @@ class BgpRouteSelector {
     private RouteUpdate processAddedRoute(BgpRouteEntry bgpRouteEntry) {
         RouteUpdate routeUpdate;
         BgpRouteEntry bestBgpRouteEntry =
-            bgpSessionManager.findBgpRoute(bgpRouteEntry.prefix());
+                bgpSessionManager.findBgpRoute(bgpRouteEntry.prefix());
 
         //
         // Install the new route entry if it is better than the
         // current best route.
         //
         if ((bestBgpRouteEntry == null) ||
-            bgpRouteEntry.isBetterThan(bestBgpRouteEntry)) {
+                bgpRouteEntry.isBetterThan(bestBgpRouteEntry)) {
             bgpSessionManager.addBgpRoute(bgpRouteEntry);
             routeUpdate =
-                new RouteUpdate(RouteUpdate.Type.UPDATE, bgpRouteEntry);
+                    new RouteUpdate(RouteUpdate.Type.UPDATE, bgpRouteEntry);
             return routeUpdate;
         }
 
@@ -120,7 +121,7 @@ class BgpRouteSelector {
         // and install it.
         //
         if (bestBgpRouteEntry.getBgpSession() !=
-            bgpRouteEntry.getBgpSession()) {
+                bgpRouteEntry.getBgpSession()) {
             return null;            // Nothing to do
         }
 
@@ -132,7 +133,7 @@ class BgpRouteSelector {
             // pre-caution.
             //
             log.debug("BGP next best route for prefix {} is missing. " +
-                      "Adding the route that is currently processed.",
+                              "Adding the route that is currently processed.",
                       bgpRouteEntry.prefix());
             bestBgpRouteEntry = bgpRouteEntry;
         }
@@ -154,7 +155,7 @@ class BgpRouteSelector {
     private RouteUpdate processDeletedRoute(BgpRouteEntry bgpRouteEntry) {
         RouteUpdate routeUpdate;
         BgpRouteEntry bestBgpRouteEntry =
-            bgpSessionManager.findBgpRoute(bgpRouteEntry.prefix());
+                bgpSessionManager.findBgpRoute(bgpRouteEntry.prefix());
 
         //
         // Remove the route entry only if it was the best one.

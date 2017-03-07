@@ -15,16 +15,6 @@
  */
 package org.onosproject.vtnrsc.virtualport.impl;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.UUID;
-import java.util.stream.Collectors;
-
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Deactivate;
@@ -39,6 +29,7 @@ import org.onosproject.core.CoreService;
 import org.onosproject.event.AbstractListenerManager;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Host;
+import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.store.serializers.KryoNamespaces;
 import org.onosproject.store.service.EventuallyConsistentMap;
 import org.onosproject.store.service.EventuallyConsistentMapEvent;
@@ -69,13 +60,23 @@ import org.onosproject.vtnrsc.virtualport.VirtualPortService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+
 /**
  * Provides implementation of the VirtualPort APIs.
  */
 @Component(immediate = true)
 @Service
 public class VirtualPortManager extends AbstractListenerManager<VirtualPortEvent, VirtualPortListener>
-implements VirtualPortService {
+        implements VirtualPortService {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
@@ -91,6 +92,13 @@ implements VirtualPortService {
     private static final String MAC_NOT_NULL = "Mac address  cannot be null";
     private static final String IP_NOT_NULL = "Ip  cannot be null";
     private static final String EVENT_NOT_NULL = "event cannot be null";
+    private static final String SET = "set";
+    private static final String UPDATE = "update";
+    private static final String DELETE = "delete";
+    private static final String SLASH = "/";
+    private static final String PROTON_BASE_PORT = "Port";
+    private static final String PROTON_VPN_BINDING = "VpnBinding";
+    private static final String JSON_NOT_NULL = "JsonNode can not be null";
 
     protected EventuallyConsistentMap<VirtualPortId, VirtualPort> vPortStore;
     protected ApplicationId appId;
@@ -103,6 +111,9 @@ implements VirtualPortService {
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected CoreService coreService;
+
+    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+    protected NetworkConfigService configService;
 
     private EventuallyConsistentMapListener<VirtualPortId, VirtualPort> virtualPortListener =
             new InnerVirtualPortStoreListener();
@@ -301,8 +312,8 @@ implements VirtualPortService {
     }
 
     private class InnerVirtualPortStoreListener
-    implements
-    EventuallyConsistentMapListener<VirtualPortId, VirtualPort> {
+            implements
+            EventuallyConsistentMapListener<VirtualPortId, VirtualPort> {
 
         @Override
         public void event(EventuallyConsistentMapEvent<VirtualPortId, VirtualPort> event) {
@@ -311,13 +322,13 @@ implements VirtualPortService {
             VirtualPort virtualPort = event.value();
             if (EventuallyConsistentMapEvent.Type.PUT == event.type()) {
                 notifyListeners(new VirtualPortEvent(
-                                                     VirtualPortEvent.Type.VIRTUAL_PORT_PUT,
-                                                     virtualPort));
+                        VirtualPortEvent.Type.VIRTUAL_PORT_PUT,
+                        virtualPort));
             }
             if (EventuallyConsistentMapEvent.Type.REMOVE == event.type()) {
                 notifyListeners(new VirtualPortEvent(
-                                                     VirtualPortEvent.Type.VIRTUAL_PORT_DELETE,
-                                                     virtualPort));
+                        VirtualPortEvent.Type.VIRTUAL_PORT_DELETE,
+                        virtualPort));
             }
         }
     }

@@ -168,6 +168,7 @@ ONOS_APPS = [
     '//apps/castor:onos-apps-castor-oar',
     '//apps/yms:onos-apps-yms-oar',
     '//apps/gluon:onos-apps-gluon-oar',
+    '//apps/evpnopenflow:onos-apps-evpnopenflow-oar',
 ]
 
 APP_JARS = [

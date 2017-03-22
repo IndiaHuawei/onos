@@ -28,6 +28,7 @@ import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.net.EncapsulationType;
 import org.onosproject.net.PortNumber;
+import org.onosproject.net.ResourceGroup;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.DefaultTrafficTreatment;
 import org.onosproject.net.flow.TrafficSelector;
@@ -37,6 +38,7 @@ import org.onosproject.net.intent.Intent;
 import org.onosproject.net.intent.Key;
 import org.onosproject.net.intent.constraint.BandwidthConstraint;
 import org.onosproject.net.intent.constraint.EncapsulationConstraint;
+import org.onosproject.net.intent.constraint.HashedPathSelectionConstraint;
 import org.onosproject.net.intent.constraint.PartialFailureConstraint;
 
 import java.util.LinkedList;
@@ -175,6 +177,15 @@ public abstract class ConnectivityIntentCommand extends AbstractShellCommand {
     @Option(name = "-e", aliases = "--encapsulation", description = "Encapsulation type",
             required = false, multiValued = false)
     private String encapsulationString = null;
+
+    @Option(name = "--hashed", description = "Hashed path selection",
+            required = false, multiValued = false)
+    private boolean hashedPathSelection = false;
+
+    // Resource Group
+    @Option(name = "-r", aliases = "--resourceGroup", description = "Resource Group Id",
+            required = false, multiValued = false)
+    private String resourceGroupId = null;
 
 
     /**
@@ -385,6 +396,10 @@ public abstract class ConnectivityIntentCommand extends AbstractShellCommand {
             constraints.add(new EncapsulationConstraint(encapType));
         }
 
+        // Check for hashed path selection
+        if (hashedPathSelection) {
+            constraints.add(new HashedPathSelectionConstraint());
+        }
         return constraints;
     }
 
@@ -398,6 +413,18 @@ public abstract class ConnectivityIntentCommand extends AbstractShellCommand {
             appIdForIntent = service.getAppId(appId);
         }
         return appIdForIntent;
+    }
+
+    protected ResourceGroup resourceGroup() {
+        if (resourceGroupId != null) {
+            if (resourceGroupId.toLowerCase().startsWith("0x")) {
+                return ResourceGroup.of(Long.parseUnsignedLong(resourceGroupId.substring(2), 16));
+            } else {
+                return ResourceGroup.of(Long.parseUnsignedLong(resourceGroupId));
+            }
+        } else {
+            return null;
+        }
     }
 
     /**

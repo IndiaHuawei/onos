@@ -31,15 +31,17 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+
 
 
 /**
@@ -71,7 +73,7 @@ public class NetconfSessionImpl implements NetconfSession {
     private static final String EDIT_CONFIG_CLOSE = "</edit-config>";
     private static final String TARGET_OPEN = "<target>";
     private static final String TARGET_CLOSE = "</target>";
-    private static final String CONFIG_OPEN = "<config>";
+    private static final String CONFIG_OPEN = "<config xmlns:nc=\"urn:ietf:params:xml:ns:netconf:base:1.0\">";
     private static final String CONFIG_CLOSE = "</config>";
     private static final String XML_HEADER =
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
@@ -81,6 +83,8 @@ public class NetconfSessionImpl implements NetconfSession {
             "xmlns=\"urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults\"";
     private static final String SUBSCRIPTION_SUBTREE_FILTER_OPEN =
             "<filter xmlns:base10=\"urn:ietf:params:xml:ns:netconf:base:1.0\" base10:type=\"subtree\">";
+
+    private static Pattern msgIdPattern = Pattern.compile("(message-id=\"[0-9]+\")");
 
     private final AtomicInteger messageIdInteger = new AtomicInteger(0);
     private Connection netconfConnection;
@@ -101,7 +105,7 @@ public class NetconfSessionImpl implements NetconfSession {
         this.netconfConnection = null;
         this.sshSession = null;
         connectionActive = false;
-        replies = new HashMap<>();
+        replies = new ConcurrentHashMap<>();
         errorReplies = new ArrayList<>();
         startConnection();
     }
@@ -118,12 +122,20 @@ public class NetconfSessionImpl implements NetconfSession {
             }
             boolean isAuthenticated;
             try {
-                if (deviceInfo.getKeyFile() != null) {
+                if (deviceInfo.getKeyFile() != null && deviceInfo.getKeyFile().canRead()) {
+                    log.debug("Authenticating with key file to device {} with username {}",
+                              deviceInfo.getDeviceId(), deviceInfo.name());
                     isAuthenticated = netconfConnection.authenticateWithPublicKey(
                             deviceInfo.name(), deviceInfo.getKeyFile(),
-                            deviceInfo.password());
+                            deviceInfo.password().equals("") ? null : deviceInfo.password());
+                } else if (deviceInfo.getKey() != null) {
+                    log.debug("Authenticating with key to device {} with username {}",
+                            deviceInfo.getDeviceId(), deviceInfo.name());
+                    isAuthenticated = netconfConnection.authenticateWithPublicKey(
+                            deviceInfo.name(), deviceInfo.getKey(),
+                            deviceInfo.password().equals("") ? null : deviceInfo.password());
                 } else {
-                    log.debug("Authenticating to device {} with username {}",
+                    log.debug("Authenticating to device {} with username {} with password",
                               deviceInfo.getDeviceId(), deviceInfo.name());
                     isAuthenticated = netconfConnection.authenticateWithPassword(
                             deviceInfo.name(), deviceInfo.password());
@@ -150,7 +162,8 @@ public class NetconfSessionImpl implements NetconfSession {
             sshSession.startSubSystem("netconf");
             streamHandler = new NetconfStreamThread(sshSession.getStdout(), sshSession.getStdin(),
                                                     sshSession.getStderr(), deviceInfo,
-                                                    new NetconfSessionDelegateImpl());
+                                                    new NetconfSessionDelegateImpl(),
+                                                    replies);
             this.addDeviceOutputListener(new NetconfDeviceOutputEventListenerImpl(deviceInfo));
             sendHello();
         } catch (IOException e) {
@@ -268,22 +281,26 @@ public class NetconfSessionImpl implements NetconfSession {
     }
 
     @Override
+    @Deprecated
     public CompletableFuture<String> request(String request) {
-        CompletableFuture<String> ftrep = streamHandler.sendMessage(request);
-        replies.put(messageIdInteger.get(), ftrep);
-        return ftrep;
+        return streamHandler.sendMessage(request);
+    }
+
+    private CompletableFuture<String> request(String request, int messageId) {
+        return streamHandler.sendMessage(request, messageId);
     }
 
     private String sendRequest(String request) throws NetconfException {
         checkAndRestablishSession();
-        request = formatRequestMessageId(request);
+        final int messageId = messageIdInteger.getAndIncrement();
+        request = formatRequestMessageId(request, messageId);
         request = formatXmlHeader(request);
-        CompletableFuture<String> futureReply = request(request);
-        messageIdInteger.incrementAndGet();
+        CompletableFuture<String> futureReply = request(request, messageId);
         int replyTimeout = NetconfControllerImpl.netconfReplyTimeout;
         String rp;
         try {
             rp = futureReply.get(replyTimeout, TimeUnit.SECONDS);
+            replies.remove(messageId);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
             throw new NetconfException("No matching reply for request " + request, e);
         }
@@ -291,15 +308,15 @@ public class NetconfSessionImpl implements NetconfSession {
         return rp.trim();
     }
 
-    private String formatRequestMessageId(String request) {
+    private String formatRequestMessageId(String request, int messageId) {
         if (request.contains(MESSAGE_ID_STRING)) {
-            //FIXME if application provieds his own counting of messages this fails that count
+            //FIXME if application provides his own counting of messages this fails that count
             request = request.replaceFirst(MESSAGE_ID_STRING + EQUAL + NUMBER_BETWEEN_QUOTES_MATCHER,
-                                           MESSAGE_ID_STRING + EQUAL + "\"" + messageIdInteger.get() + "\"");
+                                           MESSAGE_ID_STRING + EQUAL + "\"" + messageId + "\"");
         } else if (!request.contains(MESSAGE_ID_STRING) && !request.contains(HELLO)) {
             //FIXME find out a better way to enforce the presence of message-id
             request = request.replaceFirst(END_OF_RPC_OPEN_TAG, "\" " + MESSAGE_ID_STRING + EQUAL + "\""
-                    + messageIdInteger.get() + "\"" + ">");
+                    + messageId + "\"" + ">");
         }
         return request;
     }

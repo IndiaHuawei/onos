@@ -29,12 +29,12 @@
         porthl: 1,
         bg: 0,
         spr: 0,
-        ovidx: 1,   // default to traffic overlay
+        ovid: 'traffic',   // default to traffic overlay
         toolbar: 0
     };
 
     function topo2Prefs() {
-        return ps.getPrefs('topo_prefs', defaultPrefsState);
+        return ps.getPrefs('topo2_prefs', defaultPrefsState);
     }
 
     function get(key) {
@@ -45,14 +45,13 @@
     function set(key, value) {
         var preferences = topo2Prefs();
         preferences[key] = value;
-        ps.setPrefs('topo_prefs', preferences);
+        ps.setPrefs('topo2_prefs', preferences);
         return preferences[key];
     }
 
     angular.module('ovTopo2')
-    .factory('Topo2PrefsService',
-    ['PrefsService',
-
+    .factory('Topo2PrefsService', [
+        'PrefsService',
         function (_ps_) {
 
             ps = _ps_;

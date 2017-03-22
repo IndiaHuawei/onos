@@ -186,10 +186,24 @@ public class NetconfDeviceProvider extends AbstractProvider
     // Checks connection to devices in the config file
     // every DEFAULT_POLL_FREQUENCY_SECONDS seconds.
     private ScheduledFuture schedulePolling() {
-        return connectionExecutor.scheduleAtFixedRate(this::checkAndUpdateDevices,
+        return connectionExecutor.scheduleAtFixedRate(exceptionSafe(this::checkAndUpdateDevices),
                                                       DEFAULT_POLL_FREQUENCY_SECONDS / 10,
                                                       DEFAULT_POLL_FREQUENCY_SECONDS,
                                                       TimeUnit.SECONDS);
+    }
+
+    private Runnable exceptionSafe(Runnable runnable) {
+        return new Runnable() {
+
+            @Override
+            public void run() {
+                try {
+                    runnable.run();
+                } catch (Exception e) {
+                    log.error("Unhandled Exception", e);
+                }
+            }
+        };
     }
 
     @Override
@@ -250,7 +264,7 @@ public class NetconfDeviceProvider extends AbstractProvider
         //test connection to device opening a socket to it.
         try {
             socket = new Socket(ip, port);
-            log.debug("rechability of {}, {}, {}", deviceId, socket.isConnected() && !socket.isClosed());
+            log.debug("rechability of {}, {}, {}", deviceId, socket.isConnected(), !socket.isClosed());
             return socket.isConnected() && !socket.isClosed();
         } catch (IOException e) {
             log.info("Device {} is not reachable", deviceId);
@@ -318,14 +332,16 @@ public class NetconfDeviceProvider extends AbstractProvider
                             UNKNOWN, UNKNOWN,
                             cid, false,
                             annotations);
-                    deviceKeyAdminService.addKey(
-                            DeviceKey.createDeviceKeyUsingUsernamePassword(
-                                    DeviceKeyId.deviceKeyId(deviceId.toString()),
-                                    null, addr.name(), addr.password()));
+                    storeDeviceKey(addr, deviceId);
+
                     if (deviceService.getDevice(deviceId) == null) {
                         providerService.deviceConnected(deviceId, deviceDescription);
                     }
-                    checkAndUpdateDevice(deviceId, deviceDescription);
+                    try {
+                        checkAndUpdateDevice(deviceId, deviceDescription);
+                    } catch (Exception e) {
+                        log.error("Unhandled exception checking {}", deviceId, e);
+                    }
                 });
             } catch (ConfigException e) {
                 log.error("Cannot read config error " + e);
@@ -408,15 +424,26 @@ public class NetconfDeviceProvider extends AbstractProvider
                             UNKNOWN, UNKNOWN,
                             cid, false,
                             annotations);
-                    deviceKeyAdminService.addKey(
-                            DeviceKey.createDeviceKeyUsingUsernamePassword(
-                                    DeviceKeyId.deviceKeyId(deviceId.toString()),
-                                    null, addr.name(), addr.password()));
+                    storeDeviceKey(addr, deviceId);
                     checkAndUpdateDevice(deviceId, deviceDescription);
                 });
             } catch (ConfigException e) {
                 log.error("Cannot read config error " + e);
             }
+        }
+    }
+
+    private void storeDeviceKey(NetconfProviderConfig.NetconfDeviceAddress addr, DeviceId deviceId) {
+        if (addr.sshkey().equals("")) {
+            deviceKeyAdminService.addKey(
+                    DeviceKey.createDeviceKeyUsingUsernamePassword(
+                            DeviceKeyId.deviceKeyId(deviceId.toString()),
+                            null, addr.name(), addr.password()));
+        } else {
+            deviceKeyAdminService.addKey(
+                    DeviceKey.createDeviceKeyUsingSshKey(
+                            DeviceKeyId.deviceKeyId(deviceId.toString()),
+                            null, addr.name(), addr.password(), addr.sshkey()));
         }
     }
 
@@ -499,7 +526,6 @@ public class NetconfDeviceProvider extends AbstractProvider
                 executor.execute(() -> discoverPorts(event.subject().id()));
             } else if ((event.type() == DeviceEvent.Type.DEVICE_REMOVED)) {
                 log.debug("removing device {}", event.subject().id());
-                deviceService.getDevice(event.subject().id()).annotations().keys();
                 controller.disconnectDevice(event.subject().id(), true);
             }
         }
@@ -509,8 +535,8 @@ public class NetconfDeviceProvider extends AbstractProvider
             if (mastershipService.getMasterFor(event.subject().id()) == null) {
                 return true;
             }
-            return event.subject().annotations().value(AnnotationKeys.PROTOCOL)
-                    .equals(SCHEME_NAME.toUpperCase()) &&
+            return SCHEME_NAME.toUpperCase()
+                    .equals(event.subject().annotations().value(AnnotationKeys.PROTOCOL)) &&
                     mastershipService.isLocalMaster(event.subject().id());
         }
     }

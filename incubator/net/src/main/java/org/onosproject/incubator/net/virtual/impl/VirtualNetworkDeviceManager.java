@@ -17,18 +17,20 @@
 package org.onosproject.incubator.net.virtual.impl;
 
 import com.google.common.collect.ImmutableList;
-import org.onosproject.event.AbstractListenerManager;
+import org.onosproject.incubator.net.virtual.NetworkId;
 import org.onosproject.incubator.net.virtual.VirtualDevice;
-import org.onosproject.incubator.net.virtual.VirtualNetwork;
+import org.onosproject.incubator.net.virtual.VirtualNetworkEvent;
+import org.onosproject.incubator.net.virtual.VirtualNetworkListener;
 import org.onosproject.incubator.net.virtual.VirtualNetworkService;
 import org.onosproject.incubator.net.virtual.VirtualPort;
-import org.onosproject.incubator.net.virtual.VnetService;
+import org.onosproject.incubator.net.virtual.event.AbstractVirtualListenerManager;
 import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.MastershipRole;
 import org.onosproject.net.Port;
 import org.onosproject.net.PortNumber;
 import org.onosproject.net.device.DeviceEvent;
+import org.onosproject.net.device.DeviceEvent.Type;
 import org.onosproject.net.device.DeviceListener;
 import org.onosproject.net.device.DeviceService;
 import org.onosproject.net.device.PortStatistics;
@@ -43,45 +45,41 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * Device service implementation built on the virtual network service.
  */
 public class VirtualNetworkDeviceManager
-        extends AbstractListenerManager<DeviceEvent, DeviceListener>
-        implements DeviceService, VnetService {
+        extends AbstractVirtualListenerManager<DeviceEvent, DeviceListener>
+        implements DeviceService {
 
-    private static final String NETWORK_NULL = "Network ID cannot be null";
     private static final String TYPE_NULL = "Type cannot be null";
     private static final String DEVICE_NULL = "Device cannot be null";
     private static final String PORT_NUMBER_NULL = "PortNumber cannot be null";
-
-    private final VirtualNetwork network;
-    private final VirtualNetworkService manager;
+    private VirtualNetworkListener virtualNetworkListener = new InternalVirtualNetworkListener();
 
     /**
      * Creates a new VirtualNetworkDeviceService object.
      *
      * @param virtualNetworkManager virtual network manager service
-     * @param network               virtual network
+     * @param networkId a virtual network identifier
      */
     public VirtualNetworkDeviceManager(VirtualNetworkService virtualNetworkManager,
-                                       VirtualNetwork network) {
-        checkNotNull(network, NETWORK_NULL);
-        this.network = network;
-        this.manager = virtualNetworkManager;
+                                       NetworkId networkId) {
+        super(virtualNetworkManager, networkId);
+        manager.addListener(virtualNetworkListener);
     }
 
     @Override
     public int getDeviceCount() {
-        return manager.getVirtualDevices(this.network.id()).size();
+        return manager.getVirtualDevices(this.networkId).size();
     }
 
     @Override
     public Iterable<Device> getDevices() {
         return manager.getVirtualDevices(
-                this.network.id()).stream().collect(Collectors.toSet());
+                this.networkId).stream().collect(Collectors.toSet());
     }
 
     @Override
     public Iterable<Device> getDevices(Device.Type type) {
         checkNotNull(type, TYPE_NULL);
-        return manager.getVirtualDevices(this.network.id())
+        return manager.getVirtualDevices(this.networkId)
                 .stream()
                 .filter(device -> type.equals(device.type()))
                 .collect(Collectors.toSet());
@@ -101,7 +99,7 @@ public class VirtualNetworkDeviceManager
     public Device getDevice(DeviceId deviceId) {
         checkNotNull(deviceId, DEVICE_NULL);
         Optional<VirtualDevice> foundDevice =
-                manager.getVirtualDevices(this.network.id())
+                manager.getVirtualDevices(this.networkId)
                 .stream()
                 .filter(device -> deviceId.equals(device.id()))
                 .findFirst();
@@ -121,7 +119,7 @@ public class VirtualNetworkDeviceManager
     @Override
     public List<Port> getPorts(DeviceId deviceId) {
         checkNotNull(deviceId, DEVICE_NULL);
-        return manager.getVirtualPorts(this.network.id(), deviceId)
+        return manager.getVirtualPorts(this.networkId, deviceId)
                 .stream()
                 .collect(Collectors.toList());
     }
@@ -163,7 +161,7 @@ public class VirtualNetworkDeviceManager
         checkNotNull(deviceId, DEVICE_NULL);
 
         Optional<VirtualPort> foundPort =
-                manager.getVirtualPorts(this.network.id(), deviceId)
+                manager.getVirtualPorts(this.networkId, deviceId)
                 .stream()
                 .filter(port -> port.number().equals(portNumber))
                 .findFirst();
@@ -179,7 +177,48 @@ public class VirtualNetworkDeviceManager
     }
 
     @Override
-    public VirtualNetwork network() {
-        return network;
+    public String localStatus(DeviceId deviceId) {
+        // TODO not supported at this time
+        return null;
+    }
+
+    /**
+     * Translates VirtualNetworkEvent to DeviceEvent.
+     */
+    private class InternalVirtualNetworkListener implements VirtualNetworkListener {
+        @Override
+        public boolean isRelevant(VirtualNetworkEvent event) {
+            return networkId().equals(event.subject());
+        }
+
+        @Override
+        public void event(VirtualNetworkEvent event) {
+            switch (event.type()) {
+                case VIRTUAL_DEVICE_ADDED:
+                    post(new DeviceEvent(Type.DEVICE_ADDED, event.virtualDevice()));
+                    break;
+                case VIRTUAL_DEVICE_UPDATED:
+                    post(new DeviceEvent(Type.DEVICE_UPDATED, event.virtualDevice()));
+                    break;
+                case VIRTUAL_DEVICE_REMOVED:
+                    post(new DeviceEvent(Type.DEVICE_REMOVED, event.virtualDevice()));
+                    break;
+                case VIRTUAL_PORT_ADDED:
+                    post(new DeviceEvent(Type.PORT_ADDED, event.virtualDevice(), event.virtualPort()));
+                    break;
+                case VIRTUAL_PORT_UPDATED:
+                    post(new DeviceEvent(Type.PORT_UPDATED, event.virtualDevice(), event.virtualPort()));
+                    break;
+                case VIRTUAL_PORT_REMOVED:
+                    post(new DeviceEvent(Type.PORT_REMOVED, event.virtualDevice(), event.virtualPort()));
+                    break;
+                case NETWORK_UPDATED:
+                case NETWORK_REMOVED:
+                case NETWORK_ADDED:
+                default:
+                    // do nothing
+                    break;
+            }
+        }
     }
 }

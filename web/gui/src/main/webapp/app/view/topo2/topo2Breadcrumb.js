@@ -23,22 +23,26 @@
 
     'use strict';
 
-    var $log, wss;
+    var $log, $loc, wss;
 
     // Internal
     var breadcrumbContainer,
-        breadcrumbs;
+        breadcrumbs,
+        layout;
 
     function init() {
         $log.debug("Topo2BreadcrumbService Initiated");
         breadcrumbs = [];
-        breadcrumbContainer = d3.select('#breadcrumbs').append('span')
+        breadcrumbContainer = d3.select('#breadcrumbs');
+
+        breadcrumbContainer
+            .append('span')
             .text('Regions: ');
+
         render();
     }
 
     function addBreadcrumb(crumbs) {
-
         breadcrumbContainer.selectAll('.breadcrumb').remove();
         breadcrumbs = crumbs.reverse();
         render();
@@ -53,10 +57,15 @@
         // Remove breadcrumbs after index;
         breadcrumbs.splice(index + 1);
 
+        // TODO: This is duplicated code - See Topo2SubRegion:navigateToRegion()
         wss.sendEvent('topo2navRegion', {
-            dir: 'up',
             rid: data.id
         });
+
+        $loc.search('regionId', data.id);
+
+        layout.createForceElements();
+        layout.transitionDownRegion();
 
         render();
     }
@@ -82,19 +91,43 @@
             .remove();
     }
 
-    angular.module('ovTopo2')
-    .factory('Topo2BreadcrumbService',
-        ['$log', 'WebSocketService',
+    function hide() {
 
-        function (_$log_, _wss_) {
+        var view = d3.select('body');
+        view.classed('breadcrumb--hidden', true);
+
+        var startTranslateState = 'translate(0px,0%)',
+            endTranslateState = 'translate(0px,-100%)',
+            translateInterpolator = d3.interpolateString(startTranslateState, endTranslateState);
+
+        breadcrumbContainer
+            .transition()
+            .duration(600)
+            .style('opacity', 0)
+            .styleTween('transform', function (d) {
+                return translateInterpolator;
+            });
+    }
+
+    function addLayout(_layout_) {
+        layout = _layout_;
+    }
+
+    angular.module('ovTopo2')
+    .factory('Topo2BreadcrumbService', [
+        '$log', '$location', 'WebSocketService',
+        function (_$log_, _$loc_, _wss_) {
 
             $log = _$log_;
+            $loc = _$loc_;
             wss = _wss_;
 
             return {
                 init: init,
-                addBreadcrumb: addBreadcrumb
+                addBreadcrumb: addBreadcrumb,
+                addLayout: addLayout,
+                hide: hide
             };
-        }]);
-
+        }
+    ]);
 })();

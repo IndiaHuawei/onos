@@ -29,6 +29,7 @@ import org.onosproject.core.CoreService;
 import org.onosproject.core.IdGenerator;
 import org.onosproject.event.AbstractListenerManager;
 import org.onosproject.net.DeviceId;
+import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
 import org.onosproject.net.group.GroupKey;
@@ -50,8 +51,9 @@ import org.onosproject.net.intent.impl.compiler.PointToPointIntentCompiler;
 import org.onosproject.net.intent.impl.phase.FinalIntentProcessPhase;
 import org.onosproject.net.intent.impl.phase.IntentProcessPhase;
 import org.onosproject.net.intent.impl.phase.Skipped;
-import org.osgi.service.component.ComponentContext;
+import org.onosproject.net.resource.ResourceConsumer;
 import org.onosproject.net.resource.ResourceService;
+import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 
 import java.util.Collection;
@@ -132,6 +134,10 @@ public class IntentManager
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected GroupService groupService;
 
+    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+    private NetworkConfigService networkConfigService;
+
+
     private ExecutorService batchExecutor;
     private ExecutorService workerExecutor;
 
@@ -150,7 +156,8 @@ public class IntentManager
     public void activate() {
         configService.registerProperties(getClass());
 
-        intentInstaller.init(store, trackerService, flowRuleService, flowObjectiveService);
+        intentInstaller.init(store, trackerService, flowRuleService, flowObjectiveService,
+                             networkConfigService);
         if (skipReleaseResourcesOnWithdrawal) {
             store.setDelegate(testOnlyDelegate);
         } else {
@@ -161,13 +168,14 @@ public class IntentManager
         batchExecutor = newSingleThreadExecutor(groupedThreads("onos/intent", "batch", log));
         workerExecutor = newFixedThreadPool(numThreads, groupedThreads("onos/intent", "worker-%d", log));
         idGenerator = coreService.getIdGenerator("intent-ids");
+        Intent.unbindIdGenerator(idGenerator);
         Intent.bindIdGenerator(idGenerator);
         log.info("Started");
     }
 
     @Deactivate
     public void deactivate() {
-        intentInstaller.init(null, null, null, null);
+        intentInstaller.init(null, null, null, null, null);
         if (skipReleaseResourcesOnWithdrawal) {
             store.unsetDelegate(testOnlyDelegate);
         } else {
@@ -337,9 +345,8 @@ public class IntentManager
             post(event);
             switch (event.type()) {
                 case WITHDRAWN:
-                    // release resources allocated to withdrawn intent
-                    if (!resourceService.release(event.subject().id())) {
-                        log.error("Failed to release resources allocated to {}", event.subject().id());
+                    if (!skipReleaseResourcesOnWithdrawal) {
+                        releaseResources(event.subject());
                     }
                     break;
                 default:
@@ -355,6 +362,44 @@ public class IntentManager
         @Override
         public void onUpdate(IntentData intentData) {
             trackerService.trackIntent(intentData);
+        }
+
+        private void releaseResources(Intent intent) {
+            // If a resource group is set on the intent, the resource consumer is
+            // set equal to it. Otherwise it's set to the intent key
+            ResourceConsumer resourceConsumer =
+                    intent.resourceGroup() != null ? intent.resourceGroup() : intent.key();
+
+            // By default the resource doesn't get released
+            boolean removeResource = false;
+
+            if (intent.resourceGroup() == null) {
+                // If the intent doesn't have a resource group, it means the
+                // resource was registered using the intent key, so it can be
+                // released
+                removeResource = true;
+            } else {
+                // When a resource group is set, we make sure there are no other
+                // intents using the same resource group, before deleting the
+                // related resources.
+                Long remainingIntents =
+                        Tools.stream(store.getIntents())
+                             .filter(i -> {
+                                 return i.resourceGroup() != null
+                                     && i.resourceGroup().equals(intent.resourceGroup());
+                             })
+                             .count();
+                if (remainingIntents == 0) {
+                    removeResource = true;
+                }
+            }
+
+            if (removeResource) {
+                // Release resources allocated to withdrawn intent
+                if (!resourceService.release(resourceConsumer)) {
+                    log.error("Failed to release resources allocated to {}", resourceConsumer);
+                }
+            }
         }
     }
 
@@ -426,9 +471,23 @@ public class IntentManager
                                 .thenApplyAsync(IntentProcessPhase::process, workerExecutor)
                                 .thenApply(FinalIntentProcessPhase::data)
                                 .exceptionally(e -> {
-                                    //FIXME
-                                    log.warn("Future failed: {}", e);
-                                    return null;
+                                    // When the future fails, we update the Intent to simulate the failure of
+                                    // the installation/withdrawal phase and we save in the current map. In
+                                    // the next round the CleanUp Thread will pick this Intent again.
+                                    log.warn("Future failed", e);
+                                    log.warn("Intent {} - state {} - request {}",
+                                             x.key(), x.state(), x.request());
+                                    switch (x.state()) {
+                                        case INSTALL_REQ:
+                                        case INSTALLING:
+                                        case WITHDRAW_REQ:
+                                        case WITHDRAWING:
+                                            x.setState(FAILED);
+                                            IntentData current = store.getIntentData(x.key());
+                                            return new IntentData(x, current.installables());
+                                        default:
+                                            return null;
+                                    }
                                 }))
                         .collect(Collectors.toList());
 

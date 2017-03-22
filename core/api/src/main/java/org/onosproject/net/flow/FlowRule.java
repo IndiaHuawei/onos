@@ -111,7 +111,7 @@ public interface FlowRule {
 
     /**
      * Returns the hard timeout for this flow requested by an application.
-     * This paremeter configure switch's flow hard timeout.
+     * This parameter configure switch's flow hard timeout.
      * In case of controller-switch connection lost, this variable can be useful.
      * @return integer value of the hard Timeout
      */
@@ -249,6 +249,21 @@ public interface FlowRule {
         Builder makeTemporary(int timeout);
 
         /**
+         * Sets the idle timeout parameter in flow table.
+         *
+         * Will automatically make it permanent or temporary if the timeout is 0 or not, respectively.
+         * @param timeout an integer
+         * @return this
+         */
+        default Builder withIdleTimeout(int timeout) {
+            if (timeout == 0) {
+                return makePermanent();
+            } else {
+                return makeTemporary(timeout);
+            }
+        }
+
+        /**
          * Sets hard timeout parameter in flow table.
          * @param timeout an integer
          * @return this
@@ -275,6 +290,8 @@ public interface FlowRule {
      * Returns the third party original flow rule.
      *
      * @return FlowRuleExtPayLoad
+     * @deprecated in Junco release
      */
+    @Deprecated
     FlowRuleExtPayLoad payLoad();
 }

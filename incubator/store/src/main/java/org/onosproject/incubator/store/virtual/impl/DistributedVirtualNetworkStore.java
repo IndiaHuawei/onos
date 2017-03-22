@@ -114,10 +114,27 @@ public class DistributedVirtualNetworkStore
     private final MapEventListener<NetworkId, VirtualNetwork> virtualNetworkMapListener =
             new InternalMapListener<>((mapEventType, virtualNetwork) -> {
                 VirtualNetworkEvent.Type eventType =
-                    mapEventType.equals(MapEvent.Type.INSERT) ? VirtualNetworkEvent.Type.NETWORK_ADDED :
-                    mapEventType.equals(MapEvent.Type.UPDATE) ? VirtualNetworkEvent.Type.NETWORK_UPDATED :
-                    mapEventType.equals(MapEvent.Type.REMOVE) ? VirtualNetworkEvent.Type.NETWORK_REMOVED : null;
+                    mapEventType.equals(MapEvent.Type.INSERT)
+                            ? VirtualNetworkEvent.Type.NETWORK_ADDED :
+                    mapEventType.equals(MapEvent.Type.UPDATE)
+                            ? VirtualNetworkEvent.Type.NETWORK_UPDATED :
+                    mapEventType.equals(MapEvent.Type.REMOVE)
+                            ? VirtualNetworkEvent.Type.NETWORK_REMOVED : null;
                 return eventType == null ? null : new VirtualNetworkEvent(eventType, virtualNetwork.id());
+            });
+
+    // Listener for virtual device events
+    private final MapEventListener<DeviceId, VirtualDevice> virtualDeviceMapListener =
+            new InternalMapListener<>((mapEventType, virtualDevice) -> {
+                VirtualNetworkEvent.Type eventType =
+                        mapEventType.equals(MapEvent.Type.INSERT)
+                                ? VirtualNetworkEvent.Type.VIRTUAL_DEVICE_ADDED :
+                        mapEventType.equals(MapEvent.Type.UPDATE)
+                                ? VirtualNetworkEvent.Type.VIRTUAL_DEVICE_UPDATED :
+                        mapEventType.equals(MapEvent.Type.REMOVE)
+                                ? VirtualNetworkEvent.Type.VIRTUAL_DEVICE_REMOVED : null;
+                return eventType == null ? null :
+                        new VirtualNetworkEvent(eventType, virtualDevice.networkId(), virtualDevice);
             });
 
     // Track virtual network IDs by tenant Id
@@ -127,17 +144,6 @@ public class DistributedVirtualNetworkStore
     // Track virtual devices by device Id
     private ConsistentMap<DeviceId, VirtualDevice> deviceIdVirtualDeviceConsistentMap;
     private Map<DeviceId, VirtualDevice> deviceIdVirtualDeviceMap;
-
-    // Listener for virtual device events
-    private final MapEventListener<DeviceId, VirtualDevice> virtualDeviceMapListener =
-            new InternalMapListener<>((mapEventType, virtualDevice) -> {
-                VirtualNetworkEvent.Type eventType =
-                    mapEventType.equals(MapEvent.Type.INSERT) ? VirtualNetworkEvent.Type.VIRTUAL_DEVICE_ADDED :
-                    mapEventType.equals(MapEvent.Type.UPDATE) ? VirtualNetworkEvent.Type.VIRTUAL_DEVICE_UPDATED :
-                    mapEventType.equals(MapEvent.Type.REMOVE) ? VirtualNetworkEvent.Type.VIRTUAL_DEVICE_REMOVED : null;
-                return eventType == null ? null :
-                        new VirtualNetworkEvent(eventType, virtualDevice.networkId(), virtualDevice);
-            });
 
     // Track device IDs by network Id
     private ConsistentMap<NetworkId, Set<DeviceId>> networkIdDeviceIdSetConsistentMap;
@@ -288,16 +294,6 @@ public class DistributedVirtualNetworkStore
         networkIdVirtualNetworkConsistentMap.removeListener(virtualNetworkMapListener);
         deviceIdVirtualDeviceConsistentMap.removeListener(virtualDeviceMapListener);
         log.info("Stopped");
-    }
-
-    /**
-     * This method is used for Junit tests to set the CoreService instance, which
-     * is required to set the IdGenerator instance.
-     *
-     * @param coreService core service instance
-     */
-    public void setCoreService(CoreService coreService) {
-        this.coreService = coreService;
     }
 
     @Override
@@ -547,7 +543,7 @@ public class DistributedVirtualNetworkStore
             virtualPortSet = new HashSet<>();
         }
 
-        Device device = deviceIdVirtualDeviceMap.get(deviceId);
+        VirtualDevice device = deviceIdVirtualDeviceMap.get(deviceId);
         checkNotNull(device, "The device has not been created for deviceId: " + deviceId);
 
         boolean exist = virtualPortSet.stream().anyMatch(
@@ -560,7 +556,7 @@ public class DistributedVirtualNetworkStore
         virtualPortSet.add(virtualPort);
         networkIdVirtualPortSetMap.put(networkId, virtualPortSet);
         notifyDelegate(new VirtualNetworkEvent(VirtualNetworkEvent.Type.VIRTUAL_PORT_ADDED,
-                                               networkId, virtualPort));
+                                               networkId, device, virtualPort));
         return virtualPort;
     }
 
@@ -576,7 +572,7 @@ public class DistributedVirtualNetworkStore
                         p.number().equals(portNumber)).findFirst().get();
         checkNotNull(vPort, "The virtual port has not been added.");
 
-        Device device = deviceIdVirtualDeviceMap.get(deviceId);
+        VirtualDevice device = deviceIdVirtualDeviceMap.get(deviceId);
         checkNotNull(device, "The device has not been created for deviceId: "
                 + deviceId);
 
@@ -585,12 +581,15 @@ public class DistributedVirtualNetworkStore
         virtualPortSet.add(vPort);
         networkIdVirtualPortSetMap.put(networkId, virtualPortSet);
         notifyDelegate(new VirtualNetworkEvent(VirtualNetworkEvent.Type.VIRTUAL_PORT_UPDATED,
-                                               networkId, vPort));
+                                               networkId, device, vPort));
     }
 
     @Override
     public void removePort(NetworkId networkId, DeviceId deviceId, PortNumber portNumber) {
         checkState(networkExists(networkId), "The network has not been added.");
+        VirtualDevice device = deviceIdVirtualDeviceMap.get(deviceId);
+        checkNotNull(device, "The device has not been created for deviceId: "
+                + deviceId);
 
         Set<VirtualPort> virtualPortSet = new HashSet<>();
         networkIdVirtualPortSetMap.get(networkId).forEach(port -> {
@@ -612,7 +611,7 @@ public class DistributedVirtualNetworkStore
             if (portRemoved.get()) {
                 virtualPortSet.forEach(virtualPort -> notifyDelegate(
                         new VirtualNetworkEvent(VirtualNetworkEvent.Type.VIRTUAL_PORT_REMOVED,
-                                                networkId, virtualPort)
+                                                networkId, device, virtualPort)
                 ));
             }
         }

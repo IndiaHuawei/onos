@@ -92,9 +92,11 @@ public class UiWebSocket
         this.directory = directory;
         this.userName = userName;
 
-        Topo2Jsonifier t2json = new Topo2Jsonifier(directory);
+        Topo2Jsonifier t2json = new Topo2Jsonifier(directory, userName);
         UiSharedTopologyModel sharedModel = directory.get(UiSharedTopologyModel.class);
         UiTopoLayoutService layoutService = directory.get(UiTopoLayoutService.class);
+
+        sharedModel.injectJsonifier(t2json);
 
         topoSession = new UiTopoSession(this, t2json, sharedModel, layoutService);
 

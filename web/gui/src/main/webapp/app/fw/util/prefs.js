@@ -43,15 +43,28 @@
     }
 
     // converts string values to numbers for selected (or all) keys
-    function asNumbers(obj, keys) {
+    // asNumbers(obj, ['a', 'b'])        <-- convert keys .a, .b to numbers
+    // asNumbers(obj, ['a', 'b'], true)  <-- convert ALL BUT keys .a, .b to numbers
+
+    function asNumbers(obj, keys, not) {
         if (!obj) return null;
 
-        if (!keys) {
+        var skip = {};
+        if (not) {
+            keys.forEach(function (k) {
+                skip[k] = 1;
+            });
+        }
+
+        if (!keys || not) {
             // do them all
             angular.forEach(obj, function (v, k) {
-                obj[k] = Number(obj[k]);
+                if (!not || !skip[k]) {
+                    obj[k] = Number(obj[k]);
+                }
             });
         } else {
+            // do the explicitly named keys
             keys.forEach(function (k) {
                 obj[k] = Number(obj[k]);
             });
@@ -64,7 +77,17 @@
         cache[name] = obj;
         wss.sendEvent('updatePrefReq', { key: name, value: obj });
     }
-    
+
+    // merge preferences:
+    // The assumption here is that obj is a sparse object, and that the
+    //  defined keys should overwrite the corresponding values, but any
+    //  existing keys that are NOT explicitly defined here should be left
+    //  alone (not deleted).
+    function mergePrefs(name, obj) {
+        var merged = cache[name] || {};
+        setPrefs(name, angular.extend(merged, obj));
+    }
+
     function updatePrefs(data) {
         cache = data;
         listeners.forEach(function (lsnr) { lsnr(); });
@@ -101,6 +124,7 @@
                 getPrefs: getPrefs,
                 asNumbers: asNumbers,
                 setPrefs: setPrefs,
+                mergePrefs: mergePrefs,
                 addListener: addListener,
                 removeListener: removeListener
             };

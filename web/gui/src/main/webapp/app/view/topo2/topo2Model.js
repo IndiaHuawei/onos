@@ -22,15 +22,14 @@ Visualization of the topology in an SVG layer, using a D3 Force Layout.
 (function () {
     'use strict';
 
-    var extend;
-
-    function Model(attributes) {
+    function Model(attributes, collection) {
 
         var attrs = attributes || {};
         this.attributes = {};
 
         attrs = angular.extend({}, attrs);
         this.set(attrs, { silent: true });
+        this.collection = collection;
         this.initialize.apply(this, arguments);
     }
 
@@ -84,11 +83,11 @@ Visualization of the topology in an SVG layer, using a D3 Force Layout.
 
                 val = attribute;
 
-                if (!angular.equals(current[index], val)) {
+                if (!_.isEqual(current[index], val)) {
                     changes.push(index);
                 }
 
-                if (angular.equals(previous[index], val)) {
+                if (!_.isEqual(previous[index], val)) {
                     delete changed[index];
                 } else {
                     changed[index] = val;
@@ -125,7 +124,7 @@ Visualization of the topology in an SVG layer, using a D3 Force Layout.
         'FnService',
         function (fn) {
             Model.extend = fn.extend;
-            
+
             return Model;
         }
     ]);

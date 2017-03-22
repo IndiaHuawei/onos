@@ -194,40 +194,50 @@ public class HostMonitor implements TimerTask {
         }
 
         if (!edgePortService.isEdgePoint(intf.connectPoint())) {
-            log.warn("Attempt to send probe out non-edge port: {}", intf);
+            log.warn("Aborting attempt to send probe out non-edge port: {}", intf);
             return;
         }
 
         for (InterfaceIpAddress ia : intf.ipAddressesList()) {
             if (ia.subnetAddress().contains(targetIp)) {
+                log.info("Sending probe for target:{} out of intf:{} vlan:{}",
+                         targetIp, intf.connectPoint(), intf.vlan());
                 sendProbe(intf.connectPoint(), targetIp, ia.ipAddress(),
                         intf.mac(), intf.vlan());
+                // account for use-cases where tagged-vlan config is used
+                if (!intf.vlanTagged().isEmpty()) {
+                    intf.vlanTagged().forEach(tag -> {
+                        log.info("Sending probe for target:{} out of intf:{} vlan:{}",
+                             targetIp, intf.connectPoint(), tag);
+                        sendProbe(intf.connectPoint(), targetIp, ia.ipAddress(),
+                                  intf.mac(), tag);
+                    });
+                }
             }
         }
     }
 
-    private void sendProbe(ConnectPoint connectPoint,
-                           IpAddress targetIp,
-                           IpAddress sourceIp, MacAddress sourceMac,
-                           VlanId vlan) {
+    public void sendProbe(ConnectPoint connectPoint,
+                          IpAddress targetIp,
+                          IpAddress sourceIp,
+                          MacAddress sourceMac,
+                          VlanId vlan) {
         Ethernet probePacket;
 
         if (targetIp.isIp4()) {
             // IPv4: Use ARP
             probePacket = buildArpRequest(targetIp, sourceIp, sourceMac, vlan);
         } else {
-            /*
-             * IPv6: Use Neighbor Discovery. According to the NDP protocol,
-             * we should use the solicitation node address as IPv6 destination
-             * and the multicast mac address as Ethernet destination.
-             */
-            byte[] destIp = IPv6.solicitationNodeAddress(targetIp.toOctets());
+             // IPv6: Use Neighbor Discovery. According to the NDP protocol,
+             // we should use the solicitation node address as IPv6 destination
+             // and the multicast mac address as Ethernet destination.
+            byte[] destIp = IPv6.getSolicitNodeAddress(targetIp.toOctets());
             probePacket = NeighborSolicitation.buildNdpSolicit(
                     targetIp.toOctets(),
                     sourceIp.toOctets(),
                     destIp,
                     sourceMac.toBytes(),
-                    IPv6.multicastMacAddress(destIp),
+                    IPv6.getMCastMacAddress(destIp),
                     vlan
             );
         }

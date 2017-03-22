@@ -15,44 +15,44 @@
  */
 
 /*
- ONOS GUI -- Topology Breadcrumb Module.
- Module that renders the breadcrumbs for regions
+ ONOS GUI -- Topology Zoom Module.
+ Module that handles Zoom events.
  */
 
 (function () {
-
     'use strict';
 
-    var zs, ps;
+    // injected references
+    var fs, zs, ps;
 
+    // internal state
     var zoomer,
         zoomEventListeners = [];
 
     function createZoomer(options) {
-        var settings = angular.extend({}, options, {
-            zoomCallback: zoomCallback
-        });
+        // need to wrap the original zoom callback to extend its behavior
+        var origCallback = fs.isF(options.zoomCallback) || function () {};
 
-        zoomer = zs.createZoomer(settings);
+        options.zoomCallback = function () {
+            origCallback();
+
+            angular.forEach(zoomEventListeners, function (ev) {
+                ev(zoomer);
+            });
+        };
+
+        zoomer = zs.createZoomer(options);
         return zoomer;
     }
 
-    function zoomCallback() {
-        var sc = zoomer.scale(),
-            tr = zoomer.translate();
-
-        ps.setPrefs('topo_zoom', { tx: tr[0], ty: tr[1], sc: sc });
-
-        angular.forEach(zoomEventListeners, function (ev) {
-            ev(zoomer);
-        });
+    function getZoomer() {
+        return zoomer;
     }
 
     function findZoomEventListener(ev) {
-        for (var i = 0, l = zoomEventListeners.length; i < l; i++) {
+        for (var i = 0, len = zoomEventListeners.length; i < len; i++) {
             if (zoomEventListeners[i] === ev) return i;
         }
-
         return -1;
     }
 
@@ -61,7 +61,6 @@
     }
 
     function removeZoomEventListener(callback) {
-
         var evIndex = findZoomEventListener(callback);
 
         if (evIndex !== -1) {
@@ -78,14 +77,16 @@
     }
 
     angular.module('ovTopo2')
-    .factory('Topo2ZoomService',
-        ['ZoomService', 'PrefsService',
-        function (_zs_, _ps_) {
+    .factory('Topo2ZoomService', [
+        'FnService', 'ZoomService', 'PrefsService',
+        function (_fs_, _zs_, _ps_) {
 
+            fs = _fs_;
             zs = _zs_;
             ps = _ps_;
 
             return {
+                getZoomer: getZoomer,
                 createZoomer: createZoomer,
                 addZoomEventListener: addZoomEventListener,
                 removeZoomEventListener: removeZoomEventListener,

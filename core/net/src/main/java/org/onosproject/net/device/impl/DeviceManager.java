@@ -18,6 +18,7 @@ package org.onosproject.net.device.impl;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -34,6 +35,7 @@ import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.Service;
+import org.joda.time.DateTime;
 import org.onlab.util.Tools;
 import org.onosproject.cluster.ClusterService;
 import org.onosproject.cluster.NodeId;
@@ -56,6 +58,7 @@ import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.net.config.PortConfigOperator;
 import org.onosproject.net.config.PortConfigOperatorRegistry;
 import org.onosproject.net.config.basics.BasicDeviceConfig;
+import org.onosproject.net.config.basics.PortAnnotationConfig;
 import org.onosproject.net.device.DefaultPortDescription;
 import org.onosproject.net.device.DeviceAdminService;
 import org.onosproject.net.device.DeviceDescription;
@@ -76,6 +79,7 @@ import org.onosproject.net.provider.ProviderId;
 import org.slf4j.Logger;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.Futures;
 
@@ -145,9 +149,29 @@ public class DeviceManager
         = synchronizedListMultimap(
            newListMultimap(new ConcurrentHashMap<>(), CopyOnWriteArrayList::new));
 
+    // not part of portOps. must be executed at the end
+    private PortAnnotationOperator portAnnotationOp;
+
+    /**
+     * Local storage for connectivity status of devices.
+     */
+    private class LocalStatus {
+        boolean connected;
+        DateTime dateTime;
+
+        public LocalStatus(boolean b, DateTime now) {
+            connected = b;
+            dateTime = now;
+        }
+    }
+    private final Map<DeviceId, LocalStatus> deviceLocalStatus =
+            Maps.newConcurrentMap();
 
     @Activate
     public void activate() {
+        portAnnotationOp = new PortAnnotationOperator(networkConfigService);
+        portOpsIndex.put(PortAnnotationConfig.class, portAnnotationOp);
+
         backgroundService = newSingleThreadScheduledExecutor(
                              groupedThreads("onos/device", "manager-background", log));
         localNodeId = clusterService.getLocalNode().id();
@@ -262,6 +286,16 @@ public class DeviceManager
         return store.isAvailable(deviceId);
     }
 
+    @Override
+    public String localStatus(DeviceId deviceId) {
+        LocalStatus ls = deviceLocalStatus.get(deviceId);
+        if (ls == null) {
+            return "No Record";
+        }
+        String timeAgo = Tools.timeAgo(ls.dateTime.getMillis());
+        return (ls.connected) ? "connected " + timeAgo : "disconnected " + timeAgo;
+    }
+
     // Check a device for control channel connectivity.
     private boolean isReachable(DeviceId deviceId) {
         if (deviceId == null) {
@@ -334,7 +368,6 @@ public class DeviceManager
                     }
                 } else {
                     // check if the device has master, if not, mark it offline
-                    NodeId masterId = mastershipService.getMasterFor(deviceId);
                     // only the nodes which has mastership role can mark any device offline.
                     CompletableFuture<MastershipRole> roleFuture = mastershipService.requestRoleFor(deviceId);
                     roleFuture.thenAccept(role -> {
@@ -404,6 +437,8 @@ public class DeviceManager
             checkNotNull(deviceDescription, DEVICE_DESCRIPTION_NULL);
             checkValidity();
 
+            deviceLocalStatus.put(deviceId, new LocalStatus(true, DateTime.now()));
+
             BasicDeviceConfig cfg = networkConfigService.getConfig(deviceId, BasicDeviceConfig.class);
             if (!isAllowed(cfg)) {
                 log.warn("Device {} is not allowed", deviceId);
@@ -445,7 +480,7 @@ public class DeviceManager
         public void deviceDisconnected(DeviceId deviceId) {
             checkNotNull(deviceId, DEVICE_ID_NULL);
             checkValidity();
-
+            deviceLocalStatus.put(deviceId, new LocalStatus(false, DateTime.now()));
             log.info("Device {} disconnected from this node", deviceId);
 
             List<PortDescription> descs = store.getPortDescriptions(provider().id(), deviceId)
@@ -550,6 +585,41 @@ public class DeviceManager
             final DeviceEvent event = store.updatePortStatus(this.provider().id(),
                                                              deviceId,
                                                              portDescription);
+            if (event != null) {
+                log.info("Device {} port {} status changed", deviceId, event.port().number());
+                post(event);
+            }
+        }
+
+        @Override
+        public void deletePort(DeviceId deviceId, PortDescription basePortDescription) {
+
+            checkNotNull(deviceId, DEVICE_ID_NULL);
+            checkNotNull(basePortDescription, PORT_DESCRIPTION_NULL);
+            checkValidity();
+
+            if (!mastershipService.isLocalMaster(deviceId)) {
+                // Never been a master for this device
+                // any update will be ignored.
+                log.trace("Ignoring {} port update on standby node. {}", deviceId,
+                          basePortDescription);
+                return;
+            }
+
+            Device device = getDevice(deviceId);
+            if (device == null) {
+                log.trace("Device not found: {}", deviceId);
+            }
+
+            PortDescription newPortDescription = new DefaultPortDescription(basePortDescription.portNumber(),
+                                                                            basePortDescription.isEnabled(),
+                                                                            true,
+                                                                            basePortDescription.type(),
+                                                                            basePortDescription.portSpeed(),
+                                                                            basePortDescription.annotations());
+            final DeviceEvent event = store.updatePortStatus(this.provider().id(),
+                                                             deviceId,
+                                                             newPortDescription);
             if (event != null) {
                 log.info("Device {} port {} status changed", deviceId, event.port().number());
                 post(event);
@@ -738,7 +808,12 @@ public class DeviceManager
         final boolean isReachable = isReachable(did);
         if (!isReachable) {
             // device is not connected to this node
-            if (myNextRole != NONE) {
+            if (mastershipService.getLocalRole(did) == NONE) {
+                log.debug("Node was instructed to be {} role for {}, "
+                                + "but this node cannot reach the device "
+                                + "and role is already None. Ignoring request.",
+                        myNextRole, did);
+            } else if (myNextRole != NONE) {
                 log.warn("Node was instructed to be {} role for {}, "
                                  + "but this node cannot reach the device.  "
                                  + "Relinquishing role.  ",
@@ -943,7 +1018,7 @@ public class DeviceManager
         for (PortConfigOperator portOp : portOps) {
             work = portOp.combine(cpt, work);
         }
-        return work;
+        return portAnnotationOp.combine(cpt, work);
     }
 
 }

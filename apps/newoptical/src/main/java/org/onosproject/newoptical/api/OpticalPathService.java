@@ -21,10 +21,14 @@ import org.onosproject.event.ListenerService;
 import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.Link;
 import org.onosproject.net.Path;
+import org.onosproject.net.intent.Key;
+import org.onosproject.newoptical.OpticalConnectivity;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Service to setup optical domain connectivity.
@@ -68,4 +72,20 @@ public interface OpticalPathService extends ListenerService<OpticalPathEvent, Op
      * @return list of link that compose a path. empty if ID is invalid.
      */
     Optional<List<Link>> getPath(OpticalConnectivityId id);
+
+    /**
+     * Lists collection of known OpticalConnectivity.
+     *
+     * @return collection of OpticalConnectivity
+     */
+    Collection<OpticalConnectivity> listConnectivity();
+
+    /**
+     * Lists intents generated from specified OpticalConnectivity.
+     *
+     * @param id OpticalConnectivity identifier
+     * @return set of Intent Key
+     */
+    Set<Key> listIntents(OpticalConnectivityId id);
+
 }

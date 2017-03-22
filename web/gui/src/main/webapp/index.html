@@ -69,6 +69,8 @@
     <script src="app/fw/svg/map.js"></script>
     <script src="app/fw/svg/zoom.js"></script>
     <script src="app/fw/svg/svgUtil.js"></script>
+    <script src="app/fw/svg/sprite.js"></script>
+    <script src="app/fw/svg/spriteData.js"></script>
 
     <script src="app/fw/remote/remote.js"></script>
     <script src="app/fw/remote/urlfn.js"></script>
@@ -104,6 +106,7 @@
     <link rel="stylesheet" href="app/fw/mast/mast-theme.css">
     <link rel="stylesheet" href="app/fw/svg/glyph.css">
     <link rel="stylesheet" href="app/fw/svg/glyph-theme.css">
+    <link rel="stylesheet" href="app/fw/svg/sprite-theme.css">
     <link rel="stylesheet" href="app/fw/svg/icon.css">
     <link rel="stylesheet" href="app/fw/svg/icon-theme.css">
     <link rel="stylesheet" href="app/fw/layer/panel.css">
@@ -129,8 +132,10 @@
     <link rel="stylesheet" href="app/fw/widget/table-theme.css">
 
     <!-- Under development for Region support. -->
-    <!--<script src="app/view/topo2/topo2.js"></script>
+    <!--
+    <script src="app/view/topo2/topo2.js"></script>
     <script src="app/view/topo2/topo2Breadcrumb.js"></script>
+    <script src="app/view/topo2/topo2Background.js"></script>
     <script src="app/view/topo2/topo2Collection.js"></script>
     <script src="app/view/topo2/topo2D3.js"></script>
     <script src="app/view/topo2/topo2Dialog.js"></script>
@@ -154,18 +159,23 @@
     <script src="app/view/topo2/topo2NodeModel.js"></script>
     <script src="app/view/topo2/topo2NodePosition.js"></script>
     <script src="app/view/topo2/topo2Panel.js"></script>
+    <script src="app/view/topo2/topo2PeerRegion.js"></script>
     <script src="app/view/topo2/topo2Prefs.js"></script>
     <script src="app/view/topo2/topo2Region.js"></script>
     <script src="app/view/topo2/topo2Select.js"></script>
+    <script src="app/view/topo2/topo2SpriteLayer.js"></script>
     <script src="app/view/topo2/topo2SummaryPanel.js"></script>
     <script src="app/view/topo2/topo2SubRegion.js"></script>
     <script src="app/view/topo2/topo2SubRegionPanel.js"></script>
     <script src="app/view/topo2/topo2Theme.js"></script>
+    <script src="app/view/topo2/topo2Toolbar.js"></script>
     <script src="app/view/topo2/topo2View.js"></script>
+    <script src="app/view/topo2/topo2ViewController.js"></script>
     <script src="app/view/topo2/topo2Zoom.js"></script>
     <script src="app/view/topo2/uiView.js"></script>
     <link rel="stylesheet" href="app/view/topo2/topo2.css">
-    <link rel="stylesheet" href="app/view/topo2/topo2-theme.css">-->
+    <link rel="stylesheet" href="app/view/topo2/topo2-theme.css">
+    -->
 
 
     <!-- Builtin views javascript. -->
@@ -186,6 +196,8 @@
     <script src="app/view/topo/topoSprite.js"></script>
     <script src="app/view/topo/topoTraffic.js"></script>
     <script src="app/view/topo/topoTrafficNew.js"></script>
+    <script src="app/view/topo/topoProtectedIntent.js"></script>
+    <script src="app/view/topo/topoProtectedIntentOverlay.js"></script>
     <script src="app/view/topo/topoToolbar.js"></script>
     <script src="app/view/device/device.js"></script>
     <script src="app/view/flow/flow.js"></script>
@@ -209,6 +221,7 @@
     <!-- Builtin views stylesheets. -->
     <link rel="stylesheet" href="app/view/topo/topo.css">
     <link rel="stylesheet" href="app/view/topo/topo-theme.css">
+    <link rel="stylesheet" href="app/view/topo/protected-intents.css">
     <link rel="stylesheet" href="app/view/device/device.css">
     <link rel="stylesheet" href="app/view/device/device-theme.css">
     <link rel="stylesheet" href="app/view/flow/flow.css">
@@ -263,7 +276,7 @@
 <script>
     <!-- Inject user agent info into html element to allow CSS sensitivity. -->
     (function () {
-        var t = !!('ontouchstart' in window) || !!('onmsgesturechange' in window);
+        var t = ('ontouchstart' in window) || ('onmsgesturechange' in window);
         d3.select(document.documentElement)
             .attr('data-useragent', navigator.userAgent)
             .attr('data-platform', navigator.platform)

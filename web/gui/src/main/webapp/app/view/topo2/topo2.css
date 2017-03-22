@@ -19,6 +19,11 @@
  ONOS GUI -- Topology View (layout) -- CSS file
  */
 
+#mast {
+    position: relative;
+    z-index: 1000;
+}
+
 /* --- Base SVG Layer --- */
 
 #ov-topo2 svg {
@@ -93,6 +98,9 @@
     top: 104px;
 }
 
+.breadcrumb--hidden #topo2-p-instance.floatpanel {
+    top: 64px;
+}
 
 /* -- Base Device Styles -- */
 #ov-topo2 svg .node {
@@ -125,3 +133,94 @@ html[data-platform='iPad'] #topo2-p-detail {
     height: 28px;
 }
 
+
+/* --- general topo2-panel styling --- */
+
+.topo2-p div.header {
+    margin-bottom: 10px;
+}
+
+.topo2-p div.header div.icon {
+    vertical-align: middle;
+    display: inline-block;
+}
+.topo2-p div.body {
+    overflow-y: scroll;
+}
+
+.topo2-p div.body::-webkit-scrollbar {
+    display: none;
+}
+
+.topo2-p svg {
+    display: inline-block;
+    width: 26px;
+    height: 26px;
+}
+
+
+.topo2-p h2 {
+    padding: 0 0 0 10px;
+    margin: 0;
+    font-weight: lighter;
+    word-wrap: break-word;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.topo2-p h3 {
+    padding: 0 4px;
+    margin: 0;
+    word-wrap: break-word;
+    top: 20px;
+    left: 50px;
+}
+
+.topo2-p p,
+.topo2-p table {
+    padding: 0;
+    margin: 0;
+    width: 100%;
+}
+
+.topo2-p td {
+    word-wrap: break-word;
+}
+.topo2-p td.label {
+    font-weight: bold;
+    padding: 0 10px 0 0;
+}
+.topo2-p td.value {
+    padding: 0;
+}
+
+#topo2-p-summary  td.label {
+    width: 50%;
+}
+
+#topo2-p-detail  div.actionBtns {
+    padding-top: 6px;
+}
+
+.topo2-p hr {
+    height: 1px;
+    border: 0;
+    margin: 4px -3px;
+}
+
+/* --- Toolbar --- */
+
+#toolbar-topo2-toolbar {
+    padding: 6px;
+}
+
+#toolbar-topo2-toolbar .tbar-row.right {
+    width: 100%;
+}
+
+#toolbar-topo2-toolbar .tbar-row-text {
+    height: 21px;
+    text-align: right;
+    padding: 8px 60px 0 0;
+    font-style: italic;
+}

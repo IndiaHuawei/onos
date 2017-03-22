@@ -22,11 +22,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.onlab.junit.TestTools;
 import org.onlab.junit.TestUtils;
+import org.onlab.osgi.TestServiceDirectory;
+import org.onosproject.cluster.ClusterService;
+import org.onosproject.cluster.ClusterServiceAdapter;
 import org.onosproject.common.event.impl.TestEventDispatcher;
 import org.onosproject.core.CoreService;
 import org.onosproject.core.CoreServiceAdapter;
 import org.onosproject.core.IdGenerator;
 import org.onosproject.event.Event;
+import org.onosproject.event.EventDeliveryService;
 import org.onosproject.incubator.net.tunnel.TunnelId;
 import org.onosproject.incubator.net.virtual.DefaultVirtualNetwork;
 import org.onosproject.incubator.net.virtual.NetworkId;
@@ -36,32 +40,53 @@ import org.onosproject.incubator.net.virtual.VirtualHost;
 import org.onosproject.incubator.net.virtual.VirtualLink;
 import org.onosproject.incubator.net.virtual.VirtualNetwork;
 import org.onosproject.incubator.net.virtual.VirtualNetworkEvent;
+import org.onosproject.incubator.net.virtual.VirtualNetworkFlowObjectiveStore;
+import org.onosproject.incubator.net.virtual.VirtualNetworkFlowRuleStore;
+import org.onosproject.incubator.net.virtual.VirtualNetworkGroupStore;
 import org.onosproject.incubator.net.virtual.VirtualNetworkIntent;
 import org.onosproject.incubator.net.virtual.VirtualNetworkListener;
-import org.onosproject.incubator.net.virtual.provider.VirtualNetworkProviderService;
+import org.onosproject.incubator.net.virtual.VirtualNetworkPacketStore;
 import org.onosproject.incubator.net.virtual.VirtualPort;
+import org.onosproject.incubator.net.virtual.impl.provider.DefaultVirtualFlowRuleProvider;
+import org.onosproject.incubator.net.virtual.impl.provider.DefaultVirtualGroupProvider;
 import org.onosproject.incubator.net.virtual.impl.provider.DefaultVirtualNetworkProvider;
+import org.onosproject.incubator.net.virtual.impl.provider.DefaultVirtualPacketProvider;
+import org.onosproject.incubator.net.virtual.impl.provider.VirtualProviderManager;
+import org.onosproject.incubator.net.virtual.provider.VirtualNetworkProviderService;
+import org.onosproject.incubator.net.virtual.provider.VirtualProviderRegistryService;
 import org.onosproject.incubator.store.virtual.impl.DistributedVirtualNetworkStore;
+import org.onosproject.incubator.store.virtual.impl.SimpleVirtualFlowObjectiveStore;
+import org.onosproject.incubator.store.virtual.impl.SimpleVirtualFlowRuleStore;
+import org.onosproject.incubator.store.virtual.impl.SimpleVirtualGroupStore;
+import org.onosproject.incubator.store.virtual.impl.SimpleVirtualPacketStore;
 import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Link;
 import org.onosproject.net.NetTestTools;
 import org.onosproject.net.PortNumber;
-import org.onosproject.net.TestDeviceParams;
+import org.onosproject.net.device.DeviceService;
+import org.onosproject.net.flow.FlowRuleService;
+import org.onosproject.net.group.GroupService;
+import org.onosproject.net.host.HostService;
 import org.onosproject.net.intent.FakeIntentManager;
 import org.onosproject.net.intent.Intent;
+import org.onosproject.net.intent.IntentService;
 import org.onosproject.net.intent.IntentState;
 import org.onosproject.net.intent.Key;
 import org.onosproject.net.intent.MockIdGenerator;
 import org.onosproject.net.intent.TestableIntentService;
+import org.onosproject.net.link.LinkService;
+import org.onosproject.net.packet.PacketService;
+import org.onosproject.net.topology.PathService;
 import org.onosproject.net.topology.Topology;
 import org.onosproject.net.topology.TopologyService;
 import org.onosproject.store.service.TestStorageService;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.Assert.*;
@@ -70,7 +95,7 @@ import static org.onosproject.net.NetTestTools.APP_ID;
 /**
  * Junit tests for VirtualNetworkManager.
  */
-public class VirtualNetworkManagerTest extends TestDeviceParams {
+public class VirtualNetworkManagerTest extends VirtualNetworkTestUtil {
     private final String tenantIdValue1 = "TENANT_ID1";
     private final String tenantIdValue2 = "TENANT_ID2";
 
@@ -86,14 +111,16 @@ public class VirtualNetworkManagerTest extends TestDeviceParams {
     private ConnectPoint cp6;
     private ConnectPoint cp7;
 
+    private TestServiceDirectory testDirectory;
+
     @Before
     public void setUp() throws Exception {
         virtualNetworkManagerStore = new DistributedVirtualNetworkStore();
+        Intent.unbindIdGenerator(idGenerator);
         Intent.bindIdGenerator(idGenerator);
 
         coreService = new TestCoreService();
-        virtualNetworkManagerStore.setCoreService(coreService);
-        TestUtils.setField(coreService, "coreService", new TestCoreService());
+        TestUtils.setField(virtualNetworkManagerStore, "coreService", coreService);
         TestUtils.setField(virtualNetworkManagerStore, "storageService",
                            new TestStorageService());
         virtualNetworkManagerStore.activate();
@@ -102,7 +129,12 @@ public class VirtualNetworkManagerTest extends TestDeviceParams {
         manager.store = virtualNetworkManagerStore;
         manager.addListener(listener);
         manager.intentService = intentService;
+        manager.coreService = coreService;
         NetTestTools.injectEventDispatcher(manager, new TestEventDispatcher());
+
+        testDirectory = new TestServiceDirectory();
+        TestUtils.setField(manager, "serviceDirectory", testDirectory);
+
         manager.activate();
     }
 
@@ -269,6 +301,105 @@ public class VirtualNetworkManagerTest extends TestDeviceParams {
         // Validate that the events were all received in the correct order.
         validateEvents((Enum[]) expectedEventTypes.toArray(
                 new VirtualNetworkEvent.Type[expectedEventTypes.size()]));
+    }
+
+    /**
+     * Tests getting a collection of physical device identifier corresponding to
+     * the specified virtual device.
+     */
+    @Test
+    public void testGetPhysicalDevices() {
+        manager.registerTenantId(TenantId.tenantId(tenantIdValue1));
+        manager.registerTenantId(TenantId.tenantId(tenantIdValue2));
+
+        VirtualNetwork virtualNetwork1 =
+                manager.createVirtualNetwork(TenantId.tenantId(tenantIdValue1));
+        VirtualNetwork virtualNetwork2 =
+                manager.createVirtualNetwork(TenantId.tenantId(tenantIdValue2));
+
+        // two virtual device in first virtual network
+        VirtualDevice vDevice1InVnet1 =
+                manager.createVirtualDevice(virtualNetwork1.id(), DID1);
+        VirtualDevice vDevice2InVnet1 =
+                manager.createVirtualDevice(virtualNetwork1.id(), DID2);
+        // Two virtual device in second virtual network
+        VirtualDevice vDevice1InVnet2 =
+                manager.createVirtualDevice(virtualNetwork2.id(), DID1);
+        VirtualDevice vDevice2InVnet2 =
+                manager.createVirtualDevice(virtualNetwork2.id(), DID2);
+
+        // Connection Point from each physical device
+        // Virtual network 1
+        ConnectPoint cp1InVnet1 =
+                new ConnectPoint(PHYDID1, PortNumber.portNumber(10));
+        ConnectPoint cp2InVnet1 =
+                new ConnectPoint(PHYDID2, PortNumber.portNumber(20));
+        ConnectPoint cp3InVnet1 =
+                new ConnectPoint(PHYDID3, PortNumber.portNumber(30));
+        ConnectPoint cp4InVnet1 =
+                new ConnectPoint(PHYDID4, PortNumber.portNumber(40));
+        // Virtual network 2
+        ConnectPoint cp1InVnet2 =
+                new ConnectPoint(PHYDID1, PortNumber.portNumber(10));
+        ConnectPoint cp2InVnet2 =
+                new ConnectPoint(PHYDID2, PortNumber.portNumber(20));
+        ConnectPoint cp3InVnet2 =
+                new ConnectPoint(PHYDID3, PortNumber.portNumber(30));
+        ConnectPoint cp4InVnet2 =
+                new ConnectPoint(PHYDID4, PortNumber.portNumber(40));
+
+        // Make simple BigSwitch by mapping two phyDevice to one vDevice
+        // First vDevice in first virtual network
+        manager.createVirtualPort(virtualNetwork1.id(),
+                vDevice1InVnet1.id(), PortNumber.portNumber(1), cp1InVnet1);
+        manager.createVirtualPort(virtualNetwork1.id(),
+                vDevice1InVnet1.id(), PortNumber.portNumber(2), cp2InVnet1);
+        // Second vDevice in first virtual network
+        manager.createVirtualPort(virtualNetwork1.id(),
+                vDevice2InVnet1.id(), PortNumber.portNumber(1), cp3InVnet1);
+        manager.createVirtualPort(virtualNetwork1.id(),
+                vDevice2InVnet1.id(), PortNumber.portNumber(2), cp4InVnet1);
+        // First vDevice in second virtual network
+        manager.createVirtualPort(virtualNetwork2.id(),
+                vDevice1InVnet2.id(), PortNumber.portNumber(1), cp1InVnet2);
+        manager.createVirtualPort(virtualNetwork2.id(),
+                vDevice1InVnet2.id(), PortNumber.portNumber(2), cp2InVnet2);
+        // Second vDevice in second virtual network
+        manager.createVirtualPort(virtualNetwork2.id(),
+                vDevice2InVnet2.id(), PortNumber.portNumber(1), cp3InVnet2);
+        manager.createVirtualPort(virtualNetwork2.id(),
+                vDevice2InVnet2.id(), PortNumber.portNumber(2), cp4InVnet2);
+
+
+        Set<DeviceId> physicalDeviceSet;
+        Set<DeviceId> testSet = new HashSet<>();
+        physicalDeviceSet = manager.getPhysicalDevices(virtualNetwork1.id(), vDevice1InVnet1);
+        testSet.add(PHYDID1);
+        testSet.add(PHYDID2);
+        assertEquals("The physical devices 1 did not match", testSet, physicalDeviceSet);
+        physicalDeviceSet.clear();
+        testSet.clear();
+
+        physicalDeviceSet = manager.getPhysicalDevices(virtualNetwork1.id(), vDevice2InVnet1);
+        testSet.add(PHYDID3);
+        testSet.add(PHYDID4);
+        assertEquals("The physical devices 2 did not match", testSet, physicalDeviceSet);
+        physicalDeviceSet.clear();
+        testSet.clear();
+
+        physicalDeviceSet = manager.getPhysicalDevices(virtualNetwork2.id(), vDevice1InVnet2);
+        testSet.add(PHYDID1);
+        testSet.add(PHYDID2);
+        assertEquals("The physical devices 1 did not match", testSet, physicalDeviceSet);
+        physicalDeviceSet.clear();
+        testSet.clear();
+
+        physicalDeviceSet = manager.getPhysicalDevices(virtualNetwork2.id(), vDevice2InVnet2);
+        testSet.add(PHYDID3);
+        testSet.add(PHYDID4);
+        assertEquals("The physical devices 2 did not match", testSet, physicalDeviceSet);
+        physicalDeviceSet.clear();
+        testSet.clear();
     }
 
     /**
@@ -675,6 +806,53 @@ public class VirtualNetworkManagerTest extends TestDeviceParams {
             assertTrue("The virtual link should be active.",
                        virtualLink.state().equals(Link.State.ACTIVE));
         });
+    }
+
+    /**
+     * Tests that the get() method returns saved service instances.
+     */
+    @Test
+    public void testServiceGetReturnsSavedInstance() {
+        manager.registerTenantId(TenantId.tenantId(tenantIdValue1));
+        VirtualNetwork virtualNetwork =
+                manager.createVirtualNetwork(TenantId.tenantId(tenantIdValue1));
+
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), DeviceService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), LinkService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), TopologyService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), IntentService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), HostService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), PathService.class);
+
+        // extra setup needed for FlowRuleService, PacketService, GroupService
+        VirtualProviderManager virtualProviderManager = new VirtualProviderManager();
+        virtualProviderManager.registerProvider(new DefaultVirtualFlowRuleProvider());
+        virtualProviderManager.registerProvider(new DefaultVirtualPacketProvider());
+        virtualProviderManager.registerProvider(new DefaultVirtualGroupProvider());
+        testDirectory.add(CoreService.class, coreService)
+                .add(VirtualProviderRegistryService.class, virtualProviderManager)
+                .add(EventDeliveryService.class, new TestEventDispatcher())
+                .add(ClusterService.class, new ClusterServiceAdapter())
+                .add(VirtualNetworkFlowRuleStore.class, new SimpleVirtualFlowRuleStore())
+                .add(VirtualNetworkPacketStore.class, new SimpleVirtualPacketStore())
+                .add(VirtualNetworkGroupStore.class, new SimpleVirtualGroupStore())
+                .add(VirtualNetworkFlowObjectiveStore.class, new SimpleVirtualFlowObjectiveStore());
+
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), FlowRuleService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), PacketService.class);
+        validateServiceGetReturnsSavedInstance(virtualNetwork.id(), GroupService.class);
+    }
+
+    /**
+     * Validates that the get() method returns saved service instances.
+     */
+    private <T> void validateServiceGetReturnsSavedInstance(NetworkId networkId,
+                                                            Class<T> serviceClass) {
+        T serviceInstanceFirst = manager.get(networkId, serviceClass);
+        T serviceInstanceSubsequent = manager.get(networkId, serviceClass);
+        assertSame(serviceClass.getSimpleName() +
+                     ": Subsequent get should be same as the first one",
+                     serviceInstanceFirst, serviceInstanceSubsequent);
     }
 
     /**

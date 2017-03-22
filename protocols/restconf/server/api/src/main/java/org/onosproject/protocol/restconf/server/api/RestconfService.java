@@ -21,7 +21,11 @@ import org.glassfish.jersey.server.ChunkedOutput;
 /**
  * Abstraction of RESTCONF Server functionality according to the
  * RESTCONF RFC (no official RFC number yet).
+ * <p>
+ * NOTE: This interface will be obsolete and will be replaced by the one
+ * in the RESTCONF application.
  */
+@Deprecated
 public interface RestconfService {
     /**
      * Processes a GET request against a data resource. The

@@ -23,30 +23,58 @@
     'use strict';
 
     // Injected vars
-    var rs, t2mcs;
+    var rs, t2mcs, t2sls, t2bgs;
 
     // Internal state;
     var nearDist = 15;
 
     function positionNode(node, forUpdate) {
+
         var meta = node.get('metaUi'),
             x = meta && meta.x,
             y = meta && meta.y,
+            hasMeta = x !== undefined && y !== undefined,
             dim = [800, 600],
             xy;
+
+        // If the node has metaUI data attached, it indicates that the user
+        //  has dragged the node to a new position on the view; so we should
+        //  respect that above any script-configured position...
+        // (NOTE: This is a slightly different to the original topology code)
+
+        if (hasMeta) {
+            node.fix(true);
+            node.px = node.x = x;
+            node.py = node.y = y;
+            return;
+        }
+
+        // Otherwise, use a precomputed location for peer regions, or
+        // LONG/LAT (or GRID) locations for regions/devices/hosts
+
+        if (node.nodeType === 'peer-region') {
+            var coord = [0, 0],
+                loc = {};
+
+            if (t2bgs.getBackgroundType() === 'geo') {
+                // TODO: Set coords for geo (lat/long)
+            } else {
+                loc.gridX = -20;
+                loc.gridY = 10 * node.index();
+                coord = coordFromXY(loc);
+            }
+
+            node.px = node.x = coord[0];
+            node.py = node.y = coord[1];
+
+            node.fix(true);
+            return;
+        }
 
         // If the device contains explicit LONG/LAT data, use that to position
         if (setLongLat(node)) {
             // Indicate we want to update cached meta data...
             return true;
-        }
-
-        // else if we have [x,y] cached in meta data, use that...
-        if (x !== undefined && y !== undefined) {
-            node.fixed = true;
-            node.px = node.x = x;
-            node.py = node.y = y;
-            return;
         }
 
         // if this is a node update (not a node add).. skip randomizer
@@ -93,14 +121,28 @@
         var loc = el.get('location'),
             coord;
 
-        if (loc && loc.type === 'lnglat') {
+        if (loc && loc.type === 'geo') {
 
             if (loc.lat === 0 && loc.lng === 0) {
                 return false;
             }
 
             coord = coordFromLngLat(loc);
-            el.fixed = true;
+            el.fix(true);
+            el.x = el.px = coord[0];
+            el.y = el.py = coord[1];
+
+            return true;
+        }
+
+        if (loc && loc.type === 'grid') {
+
+            if (loc.gridX === 0 && loc.gridY === 0) {
+                return false;
+            }
+
+            coord = coordFromXY(loc);
+            el.fix(true);
             el.x = el.px = coord[0];
             el.y = el.py = coord[1];
 
@@ -113,13 +155,31 @@
         return p ? p([loc.lng, loc.lat]) : [0, 0];
     }
 
+    function coordFromXY(loc) {
+
+        var bgWidth = t2sls.getWidth() || 100,
+            bgHeight = t2sls.getHeight() || 100;
+
+        var scale = 1000 / bgWidth,
+            yOffset = (1000 - (bgHeight * scale)) / 2;
+
+        // 1000 is a hardcoded HTML value of the SVG element (topo2.html)
+        var x = scale * loc.gridX,
+            y = (scale * loc.gridY) + yOffset;
+
+        return [x, y];
+    }
+
     angular.module('ovTopo2')
     .factory('Topo2NodePositionService',
         ['RandomService', 'Topo2MapConfigService',
-            function (_rs_, _t2mcs_) {
+            'Topo2SpriteLayerService', 'Topo2BackgroundService',
+            function (_rs_, _t2mcs_, _t2sls_, _t2bgs_) {
 
                 rs = _rs_;
                 t2mcs = _t2mcs_;
+                t2sls = _t2sls_;
+                t2bgs = _t2bgs_;
 
                 return {
                     positionNode: positionNode,

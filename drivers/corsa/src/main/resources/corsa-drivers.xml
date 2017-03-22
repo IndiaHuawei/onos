@@ -41,7 +41,7 @@
         <behaviour api="org.onosproject.openflow.controller.driver.OpenFlowSwitchDriver"
                    impl="org.onosproject.drivers.corsa.CorsaSwitchHandshaker"/>
     </driver>
-    <driver name="corsa-v39"
+    <driver name="corsa-v39" extends="abstract"
             manufacturer="Corsa" hwVersion="CDP6420-A00" swVersion="corsa-ovs-datapath 1.4.97">
         <behaviour api="org.onosproject.net.behaviour.Pipeliner"
                    impl="org.onosproject.drivers.corsa.CorsaPipelineV39"/>
@@ -49,5 +49,8 @@
                    impl="org.onosproject.drivers.corsa.CorsaSwitchHandshaker"/>
         <behaviour api="org.onosproject.net.behaviour.VlanQuery"
                    impl="org.onosproject.driver.query.FullVlanAvailable"/>
+    </driver>
+    <driver name="corsa-CDP6410" extends="corsa-v39"
+            manufacturer="Corsa" hwVersion="CDP6410-A00" swVersion="corsa-ovs-datapath 1.4.105.4">
     </driver>
 </drivers>

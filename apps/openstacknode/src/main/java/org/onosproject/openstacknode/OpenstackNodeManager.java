@@ -253,9 +253,17 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
             connectOvsdb(node);
             return;
         }
+
         process(new OpenstackNodeEvent(DEVICE_CREATED, node));
 
-        createTunnelInterface(node);
+        if (node.dataIp().isPresent()) {
+            createTunnelInterface(node);
+        }
+
+        if (node.vlanPort().isPresent()) {
+            addVlanPort(node);
+        }
+
         if (node.type().equals(NodeType.GATEWAY)) {
             createPatchInterface(node);
             addUplink(node);
@@ -294,7 +302,7 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
             log.warn("Failed to get node for {}", deviceId);
             return Optional.empty();
         }
-        return Optional.of(node.dataIp());
+        return node.dataIp();
     }
 
     @Override
@@ -337,7 +345,8 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
     }
 
     private NodeState nodeState(OpenstackNode node) {
-        if (!isOvsdbConnected(node) || !deviceService.isAvailable(node.intBridge())) {
+        if (!isOvsdbConnected(node) || !deviceService.isAvailable(node.intBridge()) ||
+                !isBridgeCreated(node.ovsdbId(), INTEGRATION_BRIDGE)) {
             return INIT;
         }
 
@@ -347,7 +356,11 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
             return INIT;
         }
 
-        if (!isIfaceCreated(node.ovsdbId(), DEFAULT_TUNNEL)) {
+        if (node.dataIp().isPresent() && !isIfaceCreated(node.ovsdbId(), DEFAULT_TUNNEL)) {
+            return DEVICE_CREATED;
+        }
+
+        if (node.vlanPort().isPresent() && !isIfaceCreated(node.ovsdbId(), node.vlanPort().get())) {
             return DEVICE_CREATED;
         }
 
@@ -490,6 +503,22 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
                              node.uplink().get());
     }
 
+    private void addVlanPort(OpenstackNode node) {
+        if (isIfaceCreated(node.ovsdbId(), node.vlanPort().get())) {
+            return;
+        }
+
+        Device device = deviceService.getDevice(node.ovsdbId());
+        if (device == null || !device.is(BridgeConfig.class)) {
+            log.error("Failed to add port {} on {}", node.vlanPort().get(), node.ovsdbId());
+            return;
+        }
+
+        BridgeConfig bridgeConfig =  device.as(BridgeConfig.class);
+        bridgeConfig.addPort(BridgeName.bridgeName(INTEGRATION_BRIDGE),
+                node.vlanPort().get());
+    }
+
     private boolean isOvsdbConnected(OpenstackNode node) {
         OvsdbNodeId ovsdb = new OvsdbNodeId(node.managementIp(), ovsdbPort);
         OvsdbClientService client = ovsdbController.getOvsdbClient(ovsdb);
@@ -503,7 +532,9 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
     }
 
     private Set<String> systemIfaces(OpenstackNode node) {
-        Set<String> ifaces = Sets.newHashSet(DEFAULT_TUNNEL);
+        Set<String> ifaces = Sets.newHashSet();
+        node.dataIp().ifPresent(ip -> ifaces.add(DEFAULT_TUNNEL));
+        node.vlanPort().ifPresent(p -> ifaces.add(p));
         if (node.type().equals(NodeType.GATEWAY)) {
             ifaces.add(PATCH_INTG_BRIDGE);
             ifaces.add(PATCH_ROUT_BRIDGE);
@@ -518,8 +549,9 @@ public final class OpenstackNodeManager extends ListenerRegistry<OpenstackNodeEv
                 .findFirst().orElseGet(() -> nodes().stream()
                 .filter(n -> n.routerBridge().isPresent())
                 .filter(n -> n.routerBridge().get().equals(deviceId))
-                .findFirst().orElse(null));
-
+                .findFirst().orElseGet(() -> nodes().stream()
+                                .filter(n -> n.ovsdbId().equals(deviceId))
+                                .findFirst().orElse(null)));
         return node;
     }
 

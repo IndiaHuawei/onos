@@ -46,6 +46,7 @@ import org.onosproject.net.GridType;
 import org.onosproject.net.HostLocation;
 import org.onosproject.net.Link;
 import org.onosproject.net.LinkKey;
+import org.onosproject.net.MarkerResource;
 import org.onosproject.net.OchPort;
 import org.onosproject.net.OchSignal;
 import org.onosproject.net.OduCltPort;
@@ -83,6 +84,7 @@ import org.onlab.packet.MacAddress;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.time.Duration;
 
@@ -415,6 +417,11 @@ public class KryoSerializerTest {
     }
 
     @Test
+    public void testMarkerResource() {
+        testSerializedEquals(MarkerResource.marker("testString"));
+    }
+
+    @Test
     public void testAnnotations() {
         // Annotations does not have equals defined, manually test equality
         final byte[] a1Bytes = serializer.encode(A1);
@@ -436,6 +443,19 @@ public class KryoSerializerTest {
         for (String key : expected.keys()) {
             assertEquals(expected.value(key), actual.value(key));
         }
+    }
+
+    @Test
+    public void testBitSet() {
+        BitSet bs = new BitSet(32);
+        bs.set(2);
+        bs.set(8);
+        bs.set(12);
+        bs.set(18);
+        bs.set(25);
+        bs.set(511);
+
+        testSerializedEquals(bs);
     }
 
 }

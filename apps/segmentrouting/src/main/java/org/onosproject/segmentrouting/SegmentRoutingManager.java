@@ -35,8 +35,6 @@ import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.event.Event;
-import org.onosproject.incubator.net.config.basics.ConfigException;
-import org.onosproject.incubator.net.config.basics.InterfaceConfig;
 import org.onosproject.incubator.net.config.basics.McastConfig;
 import org.onosproject.incubator.net.intf.Interface;
 import org.onosproject.incubator.net.intf.InterfaceService;
@@ -77,7 +75,6 @@ import org.onosproject.net.packet.PacketProcessor;
 import org.onosproject.net.packet.PacketService;
 import org.onosproject.net.topology.PathService;
 import org.onosproject.net.topology.TopologyService;
-import org.onosproject.routing.config.RouterConfig;
 import org.onosproject.segmentrouting.config.DeviceConfigNotFoundException;
 import org.onosproject.segmentrouting.config.DeviceConfiguration;
 import org.onosproject.segmentrouting.config.PwaasConfig;
@@ -182,8 +179,8 @@ public class SegmentRoutingManager implements SegmentRoutingService {
     IcmpHandler icmpHandler = null;
     IpHandler ipHandler = null;
     RoutingRulePopulator routingRulePopulator = null;
-    public ApplicationId appId;
-    public DeviceConfiguration deviceConfiguration = null;
+    ApplicationId appId;
+    DeviceConfiguration deviceConfiguration = null;
 
     DefaultRoutingHandler defaultRoutingHandler = null;
     private TunnelHandler tunnelHandler = null;
@@ -218,17 +215,17 @@ public class SegmentRoutingManager implements SegmentRoutingService {
     /**
      * Per device next objective ID store with (device id + neighbor set) as key.
      */
-    public EventuallyConsistentMap<NeighborSetNextObjectiveStoreKey, Integer>
+    EventuallyConsistentMap<NeighborSetNextObjectiveStoreKey, Integer>
             nsNextObjStore = null;
     /**
      * Per device next objective ID store with (device id + subnet) as key.
      */
-    public EventuallyConsistentMap<VlanNextObjectiveStoreKey, Integer>
+    EventuallyConsistentMap<VlanNextObjectiveStoreKey, Integer>
             vlanNextObjStore = null;
     /**
      * Per device next objective ID store with (device id + port) as key.
      */
-    public EventuallyConsistentMap<PortNextObjectiveStoreKey, Integer>
+    EventuallyConsistentMap<PortNextObjectiveStoreKey, Integer>
             portNextObjStore = null;
 
     private EventuallyConsistentMap<String, Tunnel> tunnelStore = null;
@@ -503,6 +500,51 @@ public class SegmentRoutingManager implements SegmentRoutingService {
     }
 
     /**
+     * Extracts the application ID from the manager.
+     *
+     * @return application ID
+     */
+    public ApplicationId appId() {
+        return appId;
+    }
+
+    /**
+     * Returns the device configuration.
+     *
+     * @return device configuration
+     */
+    public DeviceConfiguration deviceConfiguration() {
+        return deviceConfiguration;
+    }
+
+    /**
+     * Per device next objective ID store with (device id + neighbor set) as key.
+     *
+     * @return next objective ID store
+     */
+    public EventuallyConsistentMap<NeighborSetNextObjectiveStoreKey, Integer> nsNextObjStore() {
+        return nsNextObjStore;
+    }
+
+    /**
+     * Per device next objective ID store with (device id + subnet) as key.
+     *
+     * @return vlan next object store
+     */
+    public EventuallyConsistentMap<VlanNextObjectiveStoreKey, Integer> vlanNextObjStore() {
+        return vlanNextObjStore;
+    }
+
+    /**
+     * Per device next objective ID store with (device id + port) as key.
+     *
+     * @return port next object store.
+     */
+    public EventuallyConsistentMap<PortNextObjectiveStoreKey, Integer> portNextObjStore() {
+        return portNextObjStore;
+    }
+
+    /**
      * Returns the MPLS-ECMP configuration.
      *
      * @return MPLS-ECMP value
@@ -725,14 +767,8 @@ public class SegmentRoutingManager implements SegmentRoutingService {
                             icmp6Packet.getIcmpType() == ICMP6.ECHO_REPLY) {
                         icmpHandler.processIcmpv6(ethernet, pkt.receivedFrom());
                     } else {
-                        // XXX Neigbour hacking, to handle the ICMPv6 packet
-                        // not under our control
-                        if (icmpHandler.handleUPstreamPackets(context)) {
-                            log.debug("Rcvd pktin from UpStream: {}", ipv6Packet);
-                        } else {
-                            log.debug("Received ICMPv6 0x{} - not handled",
-                                     Integer.toHexString(icmp6Packet.getIcmpType() & 0xff));
-                        }
+                        log.debug("Received ICMPv6 0x{} - not handled",
+                                Integer.toHexString(icmp6Packet.getIcmpType() & 0xff));
                     }
                 } else {
                    // NOTE: We don't support IP learning at this moment so this
@@ -746,8 +782,9 @@ public class SegmentRoutingManager implements SegmentRoutingService {
     private class InternalLinkListener implements LinkListener {
         @Override
         public void event(LinkEvent event) {
-            if (event.type() == LinkEvent.Type.LINK_ADDED
-                    || event.type() == LinkEvent.Type.LINK_REMOVED) {
+            if (event.type() == LinkEvent.Type.LINK_ADDED ||
+                    event.type() == LinkEvent.Type.LINK_UPDATED ||
+                    event.type() == LinkEvent.Type.LINK_REMOVED) {
                 log.debug("Event {} received from Link Service", event.type());
                 scheduleEventHandlerIfNotScheduled(event);
             }
@@ -807,7 +844,8 @@ public class SegmentRoutingManager implements SegmentRoutingService {
                             break;
                         }
                     }
-                    if (event.type() == LinkEvent.Type.LINK_ADDED) {
+                    if (event.type() == LinkEvent.Type.LINK_ADDED ||
+                            event.type() == LinkEvent.Type.LINK_UPDATED) {
                         processLinkAdded((Link) event.subject());
                     } else if (event.type() == LinkEvent.Type.LINK_REMOVED) {
                         Link linkRemoved = (Link) event.subject();
@@ -1157,35 +1195,6 @@ public class SegmentRoutingManager implements SegmentRoutingService {
                     default:
                         break;
                 }
-                // XXX Neighbour hacking. This method is looking for
-                // the Internet-Router interface. In order to retrieve
-                // the upstream port.
-            } else if (event.configClass().equals(InterfaceConfig.class)) {
-                switch (event.type()) {
-                    case CONFIG_ADDED:
-                    case CONFIG_UPDATED:
-                        updateUPstreamCP();
-                    case CONFIG_REGISTERED:
-                    case CONFIG_UNREGISTERED:
-                    case CONFIG_REMOVED:
-                        break;
-                    default:
-                        break;
-                }
-                // XXX Neighbour hacking. This method is looking for
-                // the vrouter port.
-            } else if (event.configClass().equals(RouterConfig.class)) {
-                switch (event.type()) {
-                    case CONFIG_ADDED:
-                    case CONFIG_UPDATED:
-                        updateVRouterCP(event);
-                    case CONFIG_REGISTERED:
-                    case CONFIG_UNREGISTERED:
-                    case CONFIG_REMOVED:
-                        break;
-                    default:
-                        break;
-                }
             } else if (event.configClass().equals(PwaasConfig.class)) {
                 checkState(l2TunnelHandler != null, "L2TunnelHandler is not initialized");
                 switch (event.type()) {
@@ -1203,50 +1212,6 @@ public class SegmentRoutingManager implements SegmentRoutingService {
                 }
             }
         }
-    }
-
-    /////////////////////////////////////////////////////////////////
-    //    XXX Neighbour hacking, temporary workaround will be      //
-    //    removed as soon as possible, when bridging based         //
-    //    control plane redirect is implemented.                   //
-    /////////////////////////////////////////////////////////////////
-
-    // XXX Neighbour hacking. To store upstream connect
-    // point and vRouter connect point
-    ConnectPoint upstreamCP = null;
-    ConnectPoint vRouterCP = null;
-
-    // XXX Neighbour hacking. To update the Upstream CP
-    public void updateUPstreamCP() {
-        Set<ConnectPoint> portSubjects = cfgService.getSubjects(ConnectPoint.class, InterfaceConfig.class);
-        upstreamCP = null;
-        portSubjects.stream().forEach(subject -> {
-            InterfaceConfig config = cfgService.getConfig(subject, InterfaceConfig.class);
-            Set<Interface> networkInterfaces;
-            try {
-                networkInterfaces = config.getInterfaces();
-            } catch (ConfigException e) {
-                log.error("Error loading port configuration");
-                return;
-            }
-            networkInterfaces.forEach(networkInterface -> {
-                if (networkInterface.name().equals("internet-router")) {
-                    upstreamCP = subject;
-                }
-            });
-        });
-
-    }
-
-    // XXX Neighbour hacking. To update the Upstream CP
-    public void updateVRouterCP(NetworkConfigEvent event) {
-        RouterConfig config = (RouterConfig) event.config().get();
-        if (config == null) {
-            log.warn("Router config not available");
-            vRouterCP = null;
-            return;
-        }
-        vRouterCP = config.getControlPlaneConnectPoint();
     }
 
     private class InternalHostListener implements HostListener {

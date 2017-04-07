@@ -15,6 +15,6 @@
  */
 
 /**
- * The implementations of IETF l3vpn net YANG.
+ * The IETF NET l3VPN YANG application.
  */
 package org.onosproject.l3vpn.netl3vpn;

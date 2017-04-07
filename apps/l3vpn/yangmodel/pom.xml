@@ -30,22 +30,4 @@
     <packaging>bundle</packaging>
 
     <description>IETF L3VPN YANG models</description>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.onosproject</groupId>
-                <artifactId>onos-yang-maven-plugin</artifactId>
-                <version>1.11</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>yang2java</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
-    <!-- Fix maven plugin version together with fix for buck -->
 </project>

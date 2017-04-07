@@ -211,10 +211,10 @@ EOF
 
 onos ${host} <<-EOF
 
-region-add c01 SanFrancisco DATA_CENTER 37.75394143914288 -122.45945851660800 ${host}
-region-add c02 PaloAlto     DATA_CENTER 37.45466637790734 -122.21838933304870 ${host}
-region-add c03 SanJose      DATA_CENTER 37.34425619809433 -121.94768095808017 ${host}
-region-add c04 Fremont      DATA_CENTER 37.54328280574901 -122.01205548699211 ${host}
+region-add c01 "San Francisco" DATA_CENTER 37.75394143914288 -122.45945851660800 ${host}
+region-add c02 "Palo Alto"     DATA_CENTER 37.45466637790734 -122.21838933304870 ${host}
+region-add c03 "San Jose"      DATA_CENTER 37.34425619809433 -121.94768095808017 ${host}
+region-add c04 "Fremont"      DATA_CENTER 37.54328280574901 -122.01205548699211 ${host}
 
 region-add-devices c01 \
     null:0000000000000001 \
@@ -262,13 +262,15 @@ EOF
 
 ### Add layouts, associating backing regions, and optional parent.
 #
-# layout-add <layout-id> <bg-ref> <region-id(opt)> <parent-layout-id(opt)>
+# layout-add <layout-id> <bg-ref> \
+#   [ <region-id> <parent-layout-id> <scale> <offset-x> <offset-y> ]
+#
 
 onos ${host} <<-EOF
 
-layout-add root @bayareaGEO
+layout-add root @bayareaGEO . . 0.8 0.0 0.0
 
-layout-add lC01 +segmentRouting c01
+layout-add lC01 +segmentRouting c01 . 0.9 5.2 -4.0
 layout-add lC02 +segmentRouting c02
 layout-add lC03 +segmentRouting c03
 layout-add lC04 . c04         # testing no-background

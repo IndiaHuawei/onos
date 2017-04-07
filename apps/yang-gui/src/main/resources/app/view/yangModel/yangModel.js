@@ -25,23 +25,26 @@
     var $log, $scope, fs, mast, ps, wss, is;
 
     // constants
-    var topPdg = 28,
+    var topPdg = 20,
+        hFudge = 12,
+        srcFudge = 130,
         pWidth = 800;
 
     // internal state
     var detailsPanel,
-        ymodel,
         pStartY,
         pHeight,
         wSize,
         top,
-        iconDiv;
+        bottom,
+        iconDiv,
+        srcFrame,
+        srcDiv;
 
     // constants
     var pName = 'yang-model-details-panel',
         detailsReq = 'yangModelDetailsRequest',
         detailsResp = 'yangModelDetailsResponse';
-
 
 
     function createDetailsPanel() {
@@ -50,40 +53,57 @@
             margin: 0,
             hideMargin: 0
         });
+        detailsPanel.el().style({ top: pStartY + 'px'});
         $scope.hidePanel = function () { detailsPanel.hide(); };
         detailsPanel.hide();
     }
 
-    function populateDetails(details) {
-        var topData;
+    function fixHeight(d, h) {
+        d.style({ height: h + 'px'});
+    }
 
+    function populateDetails(details) {
         setUpPanel();
-        topData = top.select('.top-data');
-        populateTop(topData, details);
+        populateTop(details);
+        populateBottom(details.source);
+
         detailsPanel.height(pHeight);
+        // also have to fix the height of the source frame to make scroll work
+        fixHeight(srcFrame, pHeight - srcFudge);
     }
 
     function setUpPanel() {
-        var container, closeBtn, dataDiv;
+        var container, closeBtn;
         detailsPanel.empty();
 
         container = detailsPanel.append('div').classed('container', true);
 
         top = container.append('div').classed('top', true);
+
         closeBtn = top.append('div').classed('close-btn', true);
         addCloseBtn(closeBtn);
+
         iconDiv = top.append('div').classed('dev-icon', true);
         top.append('h2');
+        top.append('hr');
 
-        dataDiv = top.append('div').classed('top-data', true);
-        dataDiv.append('p').text('fill out properties here');
+        bottom = container.append('div').classed('bottom', true);
+        bottom.append('h2').html('YANG Source');
+
+        srcFrame = bottom.append('div').classed('src-frame', true);
+        srcDiv = srcFrame.append('div').classed('module-source', true);
+        srcDiv.append('pre');
     }
 
-    function populateTop(dataDiv, details) {
-        top.select('h2').html('ID:' + details.id);
-        // TODO: format data from 'details' into the dataDiv
-        dataDiv.append('p').html('type: ' + details.type);
+    function populateTop(details) {
+        is.loadEmbeddedIcon(iconDiv, 'nav_yang', 40);
+        top.select('h2')
+            .html('Module ' + details.id + ' (' + details.revision + ')');
+    }
 
+    function populateBottom(source) {
+        var src = srcDiv.select('pre');
+        src.html(source.join('\n'));
     }
 
     function closePanel() {
@@ -100,13 +120,10 @@
         div.on('click', closePanel);
     }
 
-
     // callback invoked when data from a details request returns from server
     function respDetailsCb(data) {
         $scope.panelData = data.details;
-        ymodel = data.yangModel;
         $scope.$apply();
-        // TODO: complete the detail panel directive.
         $log.debug('YANG_MODEL>', detailsResp, data);
     }
 
@@ -142,7 +159,7 @@
             // row selection callback
             function selCb($event, row) {
                 if ($scope.selId) {
-                    wss.sendEvent(detailsReq, { id: row.id });
+                    wss.sendEvent(detailsReq, { modelId: row.modelId, id: row.id  });
                 } else {
                     $scope.hidePanel();
                 }
@@ -174,7 +191,7 @@
                 pStartY = fs.noPxStyle(d3.select('.tabular-header'), 'height')
                         + mast.mastHeight() + topPdg;
                 wSize = fs.windowSize(pStartY);
-                pHeight = wSize.height;
+                pHeight = wSize.height - hFudge;
             }
 
             function initPanel() {

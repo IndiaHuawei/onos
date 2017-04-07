@@ -25,6 +25,24 @@
 
     var instance;
 
+    function getZoom(z, useCfg) {
+        var u = z.usr,
+            c = z.cfg;
+        return (u && !u.useCfg && !useCfg) ? u : c;
+    }
+
+    // returns the pan (offset) values as an array [x, y]
+    function zoomPan(z, useCfg) {
+        var zoom = getZoom(z, useCfg);
+        return [zoom.offsetX, zoom.offsetY];
+    }
+
+    // returns the scale value
+    function zoomScale(z, useCfg) {
+        var zoom = getZoom(z, useCfg);
+        return zoom.scale;
+    }
+
     angular.module('ovTopo2')
         .factory('Topo2BackgroundService', [
             '$log', 'Topo2ViewController', 'Topo2SpriteLayerService', 'Topo2MapService',
@@ -49,9 +67,11 @@
 
                         this.background = data;
                         this.bgType = data.bgType;
+                        this.zoomData = data.bgZoom;
 
                         var _this = this,
-                            pan = [this.background.bgZoomPanX, this.background.bgZoomPanY];
+                            pan = zoomPan(this.zoomData),
+                            scale = zoomScale(this.zoomData);
 
                         if (this.bgType === 'geo') {
 
@@ -59,16 +79,12 @@
                             t2sls.hide();
                             t2ms.show();
 
-                            t2ms.setUpMap(data.bgId, data.bgFilePath, data.bgZoomScale)
+                            t2ms.setUpMap(data.bgId, data.bgFilePath)
                             .then(function (proj) {
-                                // var z = ps.getPrefs('topo2_zoom', { tx: 0, ty: 0, sc: 1 });
-                                // zoomer.panZoom([z.tx, z.ty], z.sc);
-
                                 t2mcs.projection(proj);
-                                // $log.debug('** Zoom restored:', z);
                                 $log.debug('** We installed the projection:', proj);
                                 _this.region.loaded('bgRendered', true);
-                                t2zs.panAndZoom(pan, _this.background.bgZoomScale, 1000);
+                                t2zs.panAndZoom(pan, scale, 1000);
                             });
                         } else if (this.bgType === 'grid') {
 
@@ -79,7 +95,7 @@
                             t2sls.loadLayout(data.bgId).then(function (spriteLayout) {
                                 _this.background.layout = spriteLayout;
                                 _this.region.loaded('bgRendered', true);
-                                t2zs.panAndZoom(pan, _this.background.bgZoomScale, 1000);
+                                t2zs.panAndZoom(pan, scale, 1000);
                             });
                         } else {
                             // No background type - Tell the region the background is ready for placing nodes
@@ -93,12 +109,12 @@
                         return this.bgType;
                     },
                     resetZoom: function () {
-                        t2zs.getZoomer().reset();
+                        var pan = zoomPan(this.zoomData, true);
+                        t2zs.panAndZoom(pan, zoomScale(this.zoomData, true), 1000);
                     }
                 });
 
-
-                return instance || new BackgroundView();;
+                return instance || new BackgroundView();
             }
         ]);
 })();

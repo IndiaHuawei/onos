@@ -27,6 +27,7 @@ import org.onosproject.lisp.msg.types.LispDistinguishedNameAddress;
 import org.onosproject.lisp.msg.types.LispIpv4Address;
 import org.onosproject.lisp.msg.types.LispIpv6Address;
 import org.onosproject.lisp.msg.types.LispMacAddress;
+import org.onosproject.lisp.msg.types.lcaf.LispLcafAddress;
 import org.onosproject.mapping.DefaultMapping;
 import org.onosproject.mapping.DefaultMappingEntry;
 import org.onosproject.mapping.DefaultMappingKey;
@@ -48,9 +49,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.UUID;
-
-import static org.onosproject.lisp.msg.types.AddressFamilyIdentifierEnum.IP4;
-import static org.onosproject.lisp.msg.types.AddressFamilyIdentifierEnum.IP6;
 
 /**
  * Mapping entry builder class.
@@ -172,17 +170,16 @@ public class MappingEntryBuilder {
     private MappingAddress buildAddress(LispMapRecord record) {
 
         return record == null ? null :
-                getAddress(record.getEidPrefixAfi(), record.getMaskLength());
+                getAddress(record.getEidPrefixAfi());
     }
 
     /**
      * Converts LispAfiAddress into abstracted mapping address.
      *
      * @param address LispAfiAddress
-     * @param length  mask length
      * @return abstracted mapping address
      */
-    private MappingAddress getAddress(LispAfiAddress address, int length) {
+    private MappingAddress getAddress(LispAfiAddress address) {
 
         if (address == null) {
             log.warn("Address is not specified.");
@@ -191,13 +188,9 @@ public class MappingEntryBuilder {
 
         switch (address.getAfi()) {
             case IP4:
-                IpAddress ipv4Address = ((LispIpv4Address) address).getAddress();
-                IpPrefix ipv4Prefix = IpPrefix.valueOf(ipv4Address, length);
-                return MappingAddresses.ipv4MappingAddress(ipv4Prefix);
+                return afi2MappingAddress(address);
             case IP6:
-                IpAddress ipv6Address = ((LispIpv6Address) address).getAddress();
-                IpPrefix ipv6Prefix = IpPrefix.valueOf(ipv6Address, length);
-                return MappingAddresses.ipv6MappingAddress(ipv6Prefix);
+                return afi2MappingAddress(address);
             case AS:
                 int asNum = ((LispAsAddress) address).getASNum();
                 return MappingAddresses.asMappingAddress(String.valueOf(asNum));
@@ -209,13 +202,48 @@ public class MappingEntryBuilder {
                 MacAddress macAddress = ((LispMacAddress) address).getAddress();
                 return MappingAddresses.ethMappingAddress(macAddress);
             case LCAF:
-                // TODO: need to use extension address to abstract LCAF address
-                break;
+                LispLcafAddress lcafAddress = (LispLcafAddress) address;
+                return lcaf2Extension(lcafAddress);
             default:
                 log.warn("Unsupported address type {}", address.getAfi());
                 break;
         }
 
+        return null;
+    }
+
+    /**
+     * Converts LCAF address to extension mapping address.
+     *
+     * @param lcaf LCAF address
+     * @return extension mapping address
+     */
+    private MappingAddress lcaf2Extension(LispLcafAddress lcaf) {
+
+        // TODO: move LCAF to extension mapping to LISP Extension Interpreter
+        return null;
+    }
+
+    /**
+     * Converts AFI address to generalized mapping address.
+     *
+     * @param afiAddress IP typed AFI address
+     * @return generalized mapping address
+     */
+    private MappingAddress afi2MappingAddress(LispAfiAddress afiAddress) {
+        switch (afiAddress.getAfi()) {
+            case IP4:
+                IpAddress ipv4Address = ((LispIpv4Address) afiAddress).getAddress();
+                IpPrefix ipv4Prefix = IpPrefix.valueOf(ipv4Address, IPV4_PREFIX_LENGTH);
+                return MappingAddresses.ipv4MappingAddress(ipv4Prefix);
+            case IP6:
+                IpAddress ipv6Address = ((LispIpv6Address) afiAddress).getAddress();
+                IpPrefix ipv6Prefix = IpPrefix.valueOf(ipv6Address, IPV6_PREFIX_LENGTH);
+                return MappingAddresses.ipv6MappingAddress(ipv6Prefix);
+            default:
+                log.warn("Only support to convert IP address type");
+                break;
+        }
         return null;
     }
 
@@ -232,14 +260,8 @@ public class MappingEntryBuilder {
         for (LispLocator locator : locators) {
             MappingTreatment.Builder builder = DefaultMappingTreatment.builder();
             LispAfiAddress address = locator.getLocatorAfi();
-            int addressLength = 0;
-            if (address.getAfi() == IP4) {
-                addressLength = IPV4_PREFIX_LENGTH;
-            } else if (address.getAfi() == IP6) {
-                addressLength = IPV6_PREFIX_LENGTH;
-            }
 
-            final MappingAddress mappingAddress = getAddress(address, addressLength);
+            final MappingAddress mappingAddress = getAddress(address);
             if (mappingAddress != null) {
                 builder.withAddress(mappingAddress);
             }

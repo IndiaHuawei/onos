@@ -91,10 +91,10 @@
             '$log', '$scope', '$route', '$routeParams', '$location',
             'KeyService', 'ThemeService', 'GlyphService', 'VeilService',
             'PanelService', 'FlashService', 'QuickHelpService', 'EeService',
-            'WebSocketService',
+            'WebSocketService', 'SpriteService',
 
             function (_$log_, $scope, $route, $routeParams, $location,
-                      ks, ts, gs, vs, ps, flash, qhs, ee, wss) {
+                      ks, ts, gs, vs, ps, flash, qhs, ee, wss, ss) {
                 var self = this;
                 $log = _$log_;
 
@@ -112,6 +112,7 @@
                 ks.installOn(d3.select('body'));
                 ks.bindQhs(qhs);
                 gs.init();
+                ss.init();
                 vs.init();
                 ps.init();
                 saucy(ee, ks);
@@ -150,7 +151,13 @@
                     $routeProvider.when('/' + vid, {
                         controller: viewCtrlName(vid),
                         controllerAs: 'ctrl',
-                        templateUrl: viewTemplateUrl(vid)
+                        templateUrl: viewTemplateUrl(vid),
+
+                        // Disable reload on $loc.hash() changes for bookmarked topo regions
+                        reloadOnSearch: (vid !== 'topo2')
+                        // <SDH> assume this is not needed for ?regionId=... query string
+                        // <SBM> Yes this is still needed. Without it the page will reload when navigating between
+                        //       regions which loads the new regions without a clean transition to it.
                     });
                 }
             });

@@ -19,7 +19,6 @@ import com.google.common.collect.Lists;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.onosproject.core.DefaultGroupId;
 import org.onosproject.core.GroupId;
 import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
@@ -54,6 +53,7 @@ import org.projectfloodlight.openflow.protocol.OFGroupModFailedCode;
 import org.projectfloodlight.openflow.protocol.OFGroupStatsReply;
 import org.projectfloodlight.openflow.protocol.OFGroupType;
 import org.projectfloodlight.openflow.protocol.OFMessage;
+import org.projectfloodlight.openflow.protocol.OFMeterFeatures;
 import org.projectfloodlight.openflow.protocol.OFPortDesc;
 import org.projectfloodlight.openflow.protocol.OFVersion;
 import org.projectfloodlight.openflow.protocol.errormsg.OFGroupModFailedErrorMsg;
@@ -91,7 +91,7 @@ public class OpenFlowGroupProviderTest {
     @Test
     public void addGroup() {
 
-        GroupId groupId = new DefaultGroupId(1);
+        GroupId groupId = new GroupId(1);
 
         List<GroupBucket> bucketList = Lists.newArrayList();
         TrafficTreatment.Builder builder = DefaultTrafficTreatment.builder();
@@ -122,7 +122,7 @@ public class OpenFlowGroupProviderTest {
         TestOpenFlowGroupProviderService testProviderService =
                 (TestOpenFlowGroupProviderService) providerService;
 
-        GroupId groupId = new DefaultGroupId(1);
+        GroupId groupId = new GroupId(1);
         List<GroupBucket> bucketList = Lists.newArrayList();
         TrafficTreatment.Builder builder = DefaultTrafficTreatment.builder();
         builder.setOutput(PortNumber.portNumber(1));
@@ -354,6 +354,11 @@ public class OpenFlowGroupProviderTest {
 
         @Override
         public List<OFPortDesc> getPorts() {
+            return null;
+        }
+
+        @Override
+        public OFMeterFeatures getMeterFeatures() {
             return null;
         }
 

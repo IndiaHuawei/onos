@@ -19,6 +19,7 @@ package org.onosproject.segmentrouting;
 import com.google.common.collect.ImmutableSet;
 import org.onlab.packet.IpPrefix;
 import org.onlab.packet.MacAddress;
+import org.onlab.packet.VlanId;
 import org.onosproject.incubator.net.routing.ResolvedRoute;
 import org.onosproject.incubator.net.routing.RouteEvent;
 import org.onosproject.net.ConnectPoint;
@@ -38,14 +39,13 @@ public class RouteHandler {
     }
 
     protected void init(DeviceId deviceId) {
-        srManager.routeService.getNextHops().forEach(nextHop -> {
-            if (nextHop.location().deviceId().equals(deviceId)) {
-                srManager.routeService.getRoutesForNextHop(nextHop.ip()).forEach(route -> {
-                    ResolvedRoute resolvedRoute =
-                            new ResolvedRoute(route, nextHop.mac(), nextHop.location());
-                    processRouteAddedInternal(resolvedRoute);
-                });
-            }
+        srManager.routeService.getRouteTables().forEach(routeTableId -> {
+            srManager.routeService.getRoutes(routeTableId).forEach(routeInfo -> {
+                routeInfo.allRoutes().stream()
+                        .filter(resolvedRoute -> resolvedRoute.location() != null &&
+                                resolvedRoute.location().deviceId().equals(deviceId))
+                        .forEach(this::processRouteAddedInternal);
+            });
         });
     }
 
@@ -57,12 +57,13 @@ public class RouteHandler {
     private void processRouteAddedInternal(ResolvedRoute route) {
         IpPrefix prefix = route.prefix();
         MacAddress nextHopMac = route.nextHopMac();
+        VlanId nextHopVlan = route.nextHopVlan();
         ConnectPoint location = route.location();
 
-        srManager.deviceConfiguration.addSubnet(location, prefix.getIp4Prefix());
-        srManager.defaultRoutingHandler.populateSubnet(location, ImmutableSet.of(prefix.getIp4Prefix()));
+        srManager.deviceConfiguration.addSubnet(location, prefix);
+        srManager.defaultRoutingHandler.populateSubnet(location, ImmutableSet.of(prefix));
         srManager.routingRulePopulator.populateRoute(location.deviceId(), prefix,
-                nextHopMac, location.port());
+                nextHopMac, nextHopVlan, location.port());
     }
 
     protected void processRouteUpdated(RouteEvent event) {
@@ -79,11 +80,12 @@ public class RouteHandler {
     private void processRouteRemovedInternal(ResolvedRoute route) {
         IpPrefix prefix = route.prefix();
         MacAddress nextHopMac = route.nextHopMac();
+        VlanId nextHopVlan = route.nextHopVlan();
         ConnectPoint location = route.location();
 
-        srManager.deviceConfiguration.removeSubnet(location, prefix.getIp4Prefix());
-        srManager.defaultRoutingHandler.revokeSubnet(ImmutableSet.of(prefix.getIp4Prefix()));
+        srManager.deviceConfiguration.removeSubnet(location, prefix);
+        srManager.defaultRoutingHandler.revokeSubnet(ImmutableSet.of(prefix));
         srManager.routingRulePopulator.revokeRoute(
-                location.deviceId(), prefix, nextHopMac, location.port());
+                location.deviceId(), prefix, nextHopMac, nextHopVlan, location.port());
     }
 }

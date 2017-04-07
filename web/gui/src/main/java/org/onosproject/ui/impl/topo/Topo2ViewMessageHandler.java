@@ -79,7 +79,7 @@ public class Topo2ViewMessageHandler extends UiMessageHandler {
 
         // get the topo session from the UiWebSocket
         topoSession = ((UiWebSocket) connection).topoSession();
-        t2json = new Topo2Jsonifier(directory);
+        t2json = new Topo2Jsonifier(directory, connection.userName());
     }
 
     @Override
@@ -93,7 +93,6 @@ public class Topo2ViewMessageHandler extends UiMessageHandler {
     }
 
     // ==================================================================
-
 
     private ObjectNode mkLayoutMessage(UiTopoLayout currentLayout) {
         List<UiTopoLayout> crumbs = topoSession.breadCrumbs();
@@ -110,7 +109,8 @@ public class Topo2ViewMessageHandler extends UiMessageHandler {
     private ObjectNode mkPeersMessage(UiTopoLayout currentLayout) {
         Set<UiNode> peers = topoSession.getPeerNodes(currentLayout);
         ObjectNode peersPayload = objectNode();
-        peersPayload.set("peers", t2json.closedNodes(peers));
+        String rid = currentLayout.regionId().toString();
+        peersPayload.set("peers", t2json.closedNodes(rid, peers));
         return peersPayload;
     }
 
@@ -204,7 +204,10 @@ public class Topo2ViewMessageHandler extends UiMessageHandler {
 
         @Override
         public void process(ObjectNode payload) {
-            t2json.updateMeta(payload);
+            // NOTE: metadata for a node is stored within the context of the
+            //       current region.
+            String rid = topoSession.currentLayout().regionId().toString();
+            t2json.updateMeta(rid, payload);
         }
     }
 

@@ -41,9 +41,14 @@ import org.onosproject.net.region.Region;
 import org.onosproject.net.statistic.StatisticService;
 import org.onosproject.net.topology.TopologyService;
 import org.onosproject.ui.JsonUtils;
+import org.onosproject.ui.UiExtensionService;
+import org.onosproject.ui.UiPreferencesService;
+import org.onosproject.ui.UiTopoMap;
+import org.onosproject.ui.UiTopoMapFactory;
 import org.onosproject.ui.impl.topo.model.UiModelEvent;
 import org.onosproject.ui.model.topo.UiClusterMember;
 import org.onosproject.ui.model.topo.UiDevice;
+import org.onosproject.ui.model.topo.UiElement;
 import org.onosproject.ui.model.topo.UiHost;
 import org.onosproject.ui.model.topo.UiLink;
 import org.onosproject.ui.model.topo.UiNode;
@@ -62,6 +67,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.onosproject.net.AnnotationKeys.GRID_X;
+import static org.onosproject.net.AnnotationKeys.GRID_Y;
 import static org.onosproject.net.AnnotationKeys.LATITUDE;
 import static org.onosproject.net.AnnotationKeys.LONGITUDE;
 import static org.onosproject.ui.model.topo.UiNode.LAYER_DEFAULT;
@@ -77,15 +84,27 @@ public class Topo2Jsonifier {
     private static final String E_UNKNOWN_UI_NODE =
             "Unknown subclass of UiNode: ";
 
+    private static final String CONTEXT_KEY_DELIM = "_";
+    private static final String NO_CONTEXT = "";
+    private static final String ZOOM_KEY = "layoutZoom";
+
     private static final String REGION = "region";
     private static final String DEVICE = "device";
     private static final String HOST = "host";
     private static final String TYPE = "type";
     private static final String SUBJECT = "subject";
+    private static final String DATA = "data";
+    private static final String MEMO = "memo";
+
+    private static final String GEO = "geo";
+    private static final String GRID = "grid";
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
     private final ObjectMapper mapper = new ObjectMapper();
+
+    // preferences are stored per user name...
+    private final String userName;
 
     private ServiceDirectory directory;
     private ClusterService clusterService;
@@ -99,6 +118,8 @@ public class Topo2Jsonifier {
     private PortStatisticsService portStatsService;
     private TopologyService topologyService;
     private TunnelService tunnelService;
+    private UiExtensionService uiextService;
+    private UiPreferencesService prefService;
 
 
     // NOTE: we'll stick this here for now, but maybe there is a better home?
@@ -112,9 +133,11 @@ public class Topo2Jsonifier {
      * on the fly.
      *
      * @param directory service directory
+     * @param userName  logged in user name
      */
-    public Topo2Jsonifier(ServiceDirectory directory) {
+    public Topo2Jsonifier(ServiceDirectory directory, String userName) {
         this.directory = checkNotNull(directory, "Directory cannot be null");
+        this.userName = checkNotNull(userName, "User name cannot be null");
 
         clusterService = directory.get(ClusterService.class);
         deviceService = directory.get(DeviceService.class);
@@ -127,10 +150,13 @@ public class Topo2Jsonifier {
         portStatsService = directory.get(PortStatisticsService.class);
         topologyService = directory.get(TopologyService.class);
         tunnelService = directory.get(TunnelService.class);
+        uiextService = directory.get(UiExtensionService.class);
+        prefService = directory.get(UiPreferencesService.class);
     }
 
     // for unit testing
     Topo2Jsonifier() {
+        userName = "(unit-test)";
     }
 
     private ObjectNode objectNode() {
@@ -193,7 +219,85 @@ public class Topo2Jsonifier {
                 .put("region", nullIsEmpty(layout.regionId()))
                 .put("regionName", UiRegion.safeName(layout.region()));
         addCrumbs(result, crumbs);
+        addBgRef(result, layout);
         return result;
+    }
+
+    private void addBgRef(ObjectNode result, UiTopoLayout layout) {
+        String mapId = layout.geomap();
+        String sprId = layout.sprites();
+
+        if (mapId != null) {
+            result.put("bgType", GEO).put("bgId", mapId);
+            addMapParameters(result, mapId);
+        } else if (sprId != null) {
+            result.put("bgType", GRID).put("bgId", sprId);
+        }
+
+        attachZoomData(result, layout);
+    }
+
+    private void attachZoomData(ObjectNode result, UiTopoLayout layout) {
+
+        ObjectNode zoomData = objectNode();
+
+        // first, set configured scale and offset
+        addCfgZoomData(zoomData, layout);
+
+        // next, retrieve user-set zoom data, if we have it
+        String rid = layout.regionId().toString();
+        ObjectNode userZoom = metaUi.get(contextKey(rid, ZOOM_KEY));
+        if (userZoom != null) {
+            zoomData.set("usr", userZoom);
+        }
+        result.set("bgZoom", zoomData);
+    }
+
+    private void addCfgZoomData(ObjectNode data, UiTopoLayout layout) {
+        ObjectNode zoom = objectNode();
+        zoom.put("scale", layout.scale());
+        zoom.put("offsetX", layout.offsetX());
+        zoom.put("offsetY", layout.offsetY());
+        data.set("cfg", zoom);
+    }
+
+    private void addMapParameters(ObjectNode result, String mapId) {
+
+        // TODO: This ought to be written more efficiently.
+
+        // ALSO: Should retrieving a UiTopoMap by ID be something that
+        //       the UiExtensionService provides, along with other
+        //       useful lookups?
+        //
+        //       Or should it remain very basic / general?
+        //
+        //       return uiextService.getTopoMap(String mapId);
+
+        final UiTopoMap[] map = {null};
+
+        uiextService.getExtensions().forEach(ext -> {
+            UiTopoMapFactory factory = ext.topoMapFactory();
+
+            // TODO: use .stream().filter(...) here
+            if (map[0] == null && factory != null) {
+                List<UiTopoMap> topoMaps = factory.geoMaps();
+
+                topoMaps.forEach(m -> {
+                    if (map[0] == null && m.id().equals(mapId)) {
+                        map[0] = m;
+                    }
+                });
+            }
+        });
+
+        UiTopoMap m = map[0];
+        if (m != null) {
+            result.put("bgDesc", m.description())
+                    .put("bgFilePath", m.filePath())
+                    .put("bgDefaultScale", m.scale());
+        } else {
+            result.put("bgWarn", "no map registered with id: " + mapId);
+        }
     }
 
     private void addCrumbs(ObjectNode result, List<UiTopoLayout> crumbs) {
@@ -223,24 +327,27 @@ public class Topo2Jsonifier {
             payload.put("note", "no-region");
             return payload;
         }
-        payload.put("id", region.idAsString());
-        payload.set("subregions", jsonSubRegions(subRegions));
+
+        String ridStr = region.idAsString();
+
+        payload.put("id", ridStr);
+        payload.set("subregions", jsonSubRegions(ridStr, subRegions));
         payload.set("links", jsonLinks(links));
 
         List<String> layerTags = region.layerOrder();
         List<Set<UiNode>> splitDevices = splitByLayer(layerTags, region.devices());
         List<Set<UiNode>> splitHosts = splitByLayer(layerTags, region.hosts());
 
-        payload.set("devices", jsonGrouped(splitDevices));
-        payload.set("hosts", jsonGrouped(splitHosts));
+        payload.set("devices", jsonGrouped(ridStr, splitDevices));
+        payload.set("hosts", jsonGrouped(ridStr, splitHosts));
         payload.set("layerOrder", jsonStrings(layerTags));
 
         return payload;
     }
 
-    private ArrayNode jsonSubRegions(Set<UiRegion> subregions) {
+    private ArrayNode jsonSubRegions(String ridStr, Set<UiRegion> subregions) {
         ArrayNode kids = arrayNode();
-        subregions.forEach(s -> kids.add(jsonClosedRegion(s)));
+        subregions.forEach(s -> kids.add(jsonClosedRegion(ridStr, s)));
         return kids;
     }
 
@@ -256,14 +363,36 @@ public class Topo2Jsonifier {
         return array;
     }
 
-    private ArrayNode jsonGrouped(List<Set<UiNode>> groupedNodes) {
+    private ArrayNode jsonGrouped(String ridStr, List<Set<UiNode>> groupedNodes) {
         ArrayNode result = arrayNode();
         groupedNodes.forEach(g -> {
             ArrayNode subset = arrayNode();
-            g.forEach(n -> subset.add(json(n)));
+            g.forEach(n -> subset.add(json(ridStr, n)));
             result.add(subset);
         });
         return result;
+    }
+
+    /**
+     * Creates a JSON representation of a UI element.
+     *
+     * @param element the source element
+     * @return a JSON representation of that element
+     */
+    public ObjectNode jsonUiElement(UiElement element) {
+        if (element instanceof UiNode) {
+            return json(NO_CONTEXT, (UiNode) element);
+        }
+        if (element instanceof UiLink) {
+            return json((UiLink) element);
+        }
+
+        // TODO: UiClusterMember
+
+        // Unrecognized UiElement class
+        return objectNode()
+                .put("warning", "unknown UiElement... cannot encode")
+                .put("javaclass", element.getClass().toString());
     }
 
     /**
@@ -276,6 +405,8 @@ public class Topo2Jsonifier {
         ObjectNode payload = objectNode();
         payload.put(TYPE, enumToString(modelEvent.type()));
         payload.put(SUBJECT, modelEvent.subject().idAsString());
+        payload.set(DATA, modelEvent.data());
+        payload.put(MEMO, modelEvent.memo());
         return payload;
     }
 
@@ -290,20 +421,20 @@ public class Topo2Jsonifier {
         return master != null ? master.toString() : "";
     }
 
-    private ObjectNode json(UiNode node) {
+    private ObjectNode json(String ridStr, UiNode node) {
         if (node instanceof UiRegion) {
-            return jsonClosedRegion((UiRegion) node);
+            return jsonClosedRegion(ridStr, (UiRegion) node);
         }
         if (node instanceof UiDevice) {
-            return json((UiDevice) node);
+            return json(ridStr, (UiDevice) node);
         }
         if (node instanceof UiHost) {
-            return json((UiHost) node);
+            return json(ridStr, (UiHost) node);
         }
         throw new IllegalStateException(E_UNKNOWN_UI_NODE + node.getClass());
     }
 
-    private ObjectNode json(UiDevice device) {
+    private ObjectNode json(String ridStr, UiDevice device) {
         ObjectNode node = objectNode()
                 .put("id", device.idAsString())
                 .put("nodeType", DEVICE)
@@ -315,8 +446,8 @@ public class Topo2Jsonifier {
         Device d = device.backingDevice();
 
         addProps(node, d);
-        addGeoLocation(node, d);
-        addMetaUi(node, device.idAsString());
+        addGeoGridLocation(node, d);
+        addMetaUi(node, ridStr, device.idAsString());
 
         return node;
     }
@@ -330,31 +461,39 @@ public class Topo2Jsonifier {
         node.set("props", props);
     }
 
-    private void addMetaUi(ObjectNode node, String metaInstanceId) {
-        ObjectNode meta = metaUi.get(metaInstanceId);
+    private void addMetaUi(ObjectNode node, String ridStr, String metaInstanceId) {
+        String key = contextKey(ridStr, metaInstanceId);
+        ObjectNode meta = metaUi.get(key);
         if (meta != null) {
             node.set("metaUi", meta);
         }
     }
 
-    private void addGeoLocation(ObjectNode node, Annotated a) {
+    private void addGeoGridLocation(ObjectNode node, Annotated a) {
         List<String> lngLat = getAnnotValues(a, LONGITUDE, LATITUDE);
-        if (lngLat != null) {
-            try {
-                double lng = Double.parseDouble(lngLat.get(0));
-                double lat = Double.parseDouble(lngLat.get(1));
-                ObjectNode loc = objectNode()
-                        .put("type", "lnglat")
-                        .put("lng", lng)
-                        .put("lat", lat);
-                node.set("location", loc);
+        List<String> gridYX = getAnnotValues(a, GRID_Y, GRID_X);
 
-            } catch (NumberFormatException e) {
-                log.warn("Invalid geo data: longitude={}, latitude={}",
-                        lngLat.get(0), lngLat.get(1));
-            }
-        } else {
-            log.debug("No geo lng/lat for {}", a);
+        if (lngLat != null) {
+            attachLocation(node, "geo", "lng", "lat", lngLat);
+        } else if (gridYX != null) {
+            attachLocation(node, "grid", "gridY", "gridX", gridYX);
+        }
+    }
+
+    private void attachLocation(ObjectNode node, String locType,
+                                String keyA, String keyB, List<String> values) {
+        try {
+            double valA = Double.parseDouble(values.get(0));
+            double valB = Double.parseDouble(values.get(1));
+            ObjectNode loc = objectNode()
+                    .put("type", locType)
+                    .put(keyA, valA)
+                    .put(keyB, valB);
+            node.set("location", loc);
+
+        } catch (NumberFormatException e) {
+            log.warn("Invalid {} data: long/Y={}, lat/X={}",
+                    locType, values.get(0), values.get(1));
         }
     }
 
@@ -392,7 +531,7 @@ public class Topo2Jsonifier {
         return p;
     }
 
-    private ObjectNode json(UiHost host) {
+    private ObjectNode json(String ridStr, UiHost host) {
         ObjectNode node = objectNode()
                 .put("id", host.idAsString())
                 .put("nodeType", HOST)
@@ -401,21 +540,25 @@ public class Topo2Jsonifier {
         Host h = host.backingHost();
 
         addIps(node, h);
-        addGeoLocation(node, h);
-        addMetaUi(node, host.idAsString());
+        addProps(node, h);
+        addGeoGridLocation(node, h);
+        addMetaUi(node, ridStr, host.idAsString());
 
         return node;
     }
 
     private ObjectNode json(UiSynthLink sLink) {
-        UiLink uLink = sLink.link();
+        return json(sLink.link());
+    }
+
+    private ObjectNode json(UiLink link) {
         ObjectNode data = objectNode()
-                .put("id", uLink.idAsString())
-                .put("epA", uLink.endPointA())
-                .put("epB", uLink.endPointB())
-                .put("type", uLink.type());
-        String pA = uLink.endPortA();
-        String pB = uLink.endPortB();
+                .put("id", link.idAsString())
+                .put("epA", link.endPointA())
+                .put("epB", link.endPointB())
+                .put("type", link.type());
+        String pA = link.endPortA();
+        String pB = link.endPortB();
         if (pA != null) {
             data.put("portA", pA);
         }
@@ -426,83 +569,48 @@ public class Topo2Jsonifier {
     }
 
 
-    private ObjectNode jsonClosedRegion(UiRegion region) {
+    private ObjectNode jsonClosedRegion(String ridStr, UiRegion region) {
         ObjectNode node = objectNode()
                 .put("id", region.idAsString())
                 .put("name", region.name())
                 .put("nodeType", REGION)
                 .put("nDevs", region.deviceCount())
                 .put("nHosts", region.hostCount());
+        // TODO: device and host counts should take into account any nested
+        //       subregions. i.e. should be the sum of all devices/hosts in
+        //       all descendent subregions.
 
         Region r = region.backingRegion();
-        addGeoLocation(node, r);
+        // this is location data, as injected via network configuration script
+        addGeoGridLocation(node, r);
         addProps(node, r);
 
-        addMetaUi(node, region.idAsString());
+        // this may contain location data, as dragged by user
+        // (which should take precedence, over configured data)
+        addMetaUi(node, ridStr, region.idAsString());
         return node;
     }
 
     /**
      * Returns a JSON array representation of a set of regions/devices. Note
      * that the information is sufficient for showing regions as nodes.
+     * THe region ID string defines the context (which region) the node is
+     * being displayed in.
      *
-     * @param nodes the nodes
+     * @param ridStr region-id string
+     * @param nodes  the nodes
      * @return a JSON representation of the nodes
      */
-    public ArrayNode closedNodes(Set<UiNode> nodes) {
+    public ArrayNode closedNodes(String ridStr, Set<UiNode> nodes) {
         ArrayNode array = arrayNode();
         for (UiNode node : nodes) {
             if (node instanceof UiRegion) {
-                array.add(jsonClosedRegion((UiRegion) node));
+                array.add(jsonClosedRegion(ridStr, (UiRegion) node));
             } else if (node instanceof UiDevice) {
-                array.add(json((UiDevice) node));
+                array.add(json(ridStr, (UiDevice) node));
             } else {
                 log.warn("Unexpected node instance: {}", node.getClass());
             }
-        }
-        return array;
-    }
-
-    /**
-     * Returns a JSON array representation of a list of regions. Note that the
-     * information about each region is limited to what needs to be used to
-     * show the regions as nodes on the view.
-     *
-     * @param regions the regions
-     * @return a JSON representation of the minimal region information
-     */
-    public ArrayNode closedRegions(Set<UiRegion> regions) {
-        ArrayNode array = arrayNode();
-        for (UiRegion r : regions) {
-            array.add(jsonClosedRegion(r));
-        }
-        return array;
-    }
-
-    /**
-     * Returns a JSON array representation of a list of devices.
-     *
-     * @param devices the devices
-     * @return a JSON representation of the devices
-     */
-    public ArrayNode devices(Set<UiDevice> devices) {
-        ArrayNode array = arrayNode();
-        for (UiDevice device : devices) {
-            array.add(json(device));
-        }
-        return array;
-    }
-
-    /**
-     * Returns a JSON array representation of a list of hosts.
-     *
-     * @param hosts the hosts
-     * @return a JSON representation of the hosts
-     */
-    public ArrayNode hosts(Set<UiHost> hosts) {
-        ArrayNode array = arrayNode();
-        for (UiHost host : hosts) {
-            array.add(json(host));
         }
         return array;
     }
@@ -535,17 +643,26 @@ public class Topo2Jsonifier {
         return splitList;
     }
 
+
+    private String contextKey(String context, String key) {
+        return context + CONTEXT_KEY_DELIM + key;
+    }
+
     /**
      * Stores the memento for an element.
-     * This method assumes the payload has an id String, memento ObjectNode
+     * This method assumes the payload has an id String, memento ObjectNode.
+     * The region-id string is used as a context within which to store the
+     * memento.
      *
+     * @param ridStr  region ID string
      * @param payload event payload
      */
-    void updateMeta(ObjectNode payload) {
+    void updateMeta(String ridStr, ObjectNode payload) {
 
         String id = JsonUtils.string(payload, "id");
-        metaUi.put(id, JsonUtils.node(payload, "memento"));
+        String key = contextKey(ridStr, id);
+        metaUi.put(key, JsonUtils.node(payload, "memento"));
 
-        log.debug("Storing metadata for {}", id);
+        log.debug("Storing metadata for {}", key);
     }
 }

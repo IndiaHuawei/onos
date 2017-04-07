@@ -24,12 +24,15 @@ import org.onosproject.net.flow.FlowRuleBatchOperation;
 import org.onosproject.net.flow.FlowRuleEvent;
 import org.onosproject.net.flow.FlowRuleStoreDelegate;
 import org.onosproject.net.flow.TableStatisticsEntry;
-import org.onosproject.store.Store;
 
 import java.util.List;
 
+/**
+ * Manages inventory of flow rules for virtual networks;
+ * not intended for direct use.
+ */
 public interface VirtualNetworkFlowRuleStore
-        extends Store<FlowRuleBatchEvent, FlowRuleStoreDelegate> {
+        extends VirtualStore<FlowRuleBatchEvent, FlowRuleStoreDelegate> {
     /**
      * Returns the number of flow rule in the store.
      *

@@ -19,23 +19,19 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.onlab.packet.Ethernet;
 import org.onlab.packet.IpPrefix;
-import org.onlab.packet.MacAddress;
 import org.onlab.packet.VlanId;
 import org.onosproject.core.ApplicationId;
-import org.onosproject.core.CoreService;
-import org.onosproject.net.DeviceId;
+import org.onosproject.core.GroupId;
 import org.onosproject.net.Port;
 import org.onosproject.net.PortNumber;
 import org.onosproject.net.behaviour.NextGroup;
 import org.onosproject.net.behaviour.PipelinerContext;
-import org.onosproject.net.device.DeviceService;
 import org.onosproject.net.flow.DefaultFlowRule;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.DefaultTrafficTreatment;
 import org.onosproject.net.flow.FlowRule;
 import org.onosproject.net.flow.FlowRuleOperations;
 import org.onosproject.net.flow.FlowRuleOperationsContext;
-import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flow.TrafficSelector;
 import org.onosproject.net.flow.TrafficTreatment;
 import org.onosproject.net.flow.criteria.Criteria;
@@ -43,19 +39,25 @@ import org.onosproject.net.flow.criteria.Criterion;
 import org.onosproject.net.flow.criteria.EthCriterion;
 import org.onosproject.net.flow.criteria.EthTypeCriterion;
 import org.onosproject.net.flow.criteria.IPCriterion;
+import org.onosproject.net.flow.criteria.Icmpv6CodeCriterion;
+import org.onosproject.net.flow.criteria.Icmpv6TypeCriterion;
 import org.onosproject.net.flow.criteria.MplsBosCriterion;
 import org.onosproject.net.flow.criteria.MplsCriterion;
 import org.onosproject.net.flow.criteria.PortCriterion;
 import org.onosproject.net.flow.criteria.VlanIdCriterion;
 import org.onosproject.net.flow.instructions.Instruction;
 import org.onosproject.net.flow.instructions.Instructions.OutputInstruction;
-import org.onosproject.net.flow.instructions.L2ModificationInstruction.ModVlanIdInstruction;
-import org.onosproject.net.flowobjective.FilteringObjective;
+import org.onosproject.net.flow.instructions.L3ModificationInstruction;
 import org.onosproject.net.flowobjective.ForwardingObjective;
 import org.onosproject.net.flowobjective.ObjectiveError;
+import org.onosproject.net.group.DefaultGroupBucket;
+import org.onosproject.net.group.DefaultGroupDescription;
+import org.onosproject.net.group.DefaultGroupKey;
 import org.onosproject.net.group.Group;
+import org.onosproject.net.group.GroupBucket;
+import org.onosproject.net.group.GroupBuckets;
+import org.onosproject.net.group.GroupDescription;
 import org.onosproject.net.group.GroupKey;
-import org.onosproject.net.group.GroupService;
 import org.onosproject.net.packet.PacketPriority;
 import org.slf4j.Logger;
 
@@ -64,12 +66,17 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
+import java.util.Objects;
 
+import static org.onlab.packet.IPv6.PROTOCOL_ICMP6;
+import static org.onlab.packet.MacAddress.BROADCAST;
+import static org.onlab.packet.MacAddress.NONE;
+import static org.onosproject.driver.pipeline.Ofdpa2GroupHandler.FOUR_BIT_MASK;
 import static org.slf4j.LoggerFactory.getLogger;
 
 
 /**
- * Driver for software switch emulation of the OFDPA 2.0 pipeline.
+ * Driver for software switch emulation of the OFDPA pipeline.
  * The software switch is the CPqD OF 1.3 switch. Unfortunately the CPqD switch
  * does not handle vlan tags and mpls labels simultaneously, which requires us
  * to do some workarounds in the driver. This driver is meant for the use of
@@ -80,161 +87,70 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
 
     private final Logger log = getLogger(getClass());
 
+    /**
+     * Table that determines whether VLAN is popped before punting to controller.
+     * <p>
+     * This is a non-OFDPA table to emulate OFDPA packet in behavior.
+     * VLAN will be popped before punting if the VLAN is internally assigned.
+     * <p>
+     * Also note that 63 is the max table number in CpqD.
+     */
+    private static final int PUNT_TABLE = 63;
+
+    /**
+     * A static indirect group that pop vlan and punt to controller.
+     * <p>
+     * The purpose of using a group instead of immediate action is that this
+     * won't affect another copy on the data plane when write action exists.
+     */
+    private static final int POP_VLAN_PUNT_GROUP_ID = 0xc0000000;
+
     @Override
-    public void init(DeviceId deviceId, PipelinerContext context) {
-        this.deviceId = deviceId;
-
-        // Initialize OFDPA group handler
-        groupHandler = new CpqdOfdpa2GroupHandler();
-        groupHandler.init(deviceId, context);
-
-        serviceDirectory = context.directory();
-        coreService = serviceDirectory.get(CoreService.class);
-        flowRuleService = serviceDirectory.get(FlowRuleService.class);
-        groupService = serviceDirectory.get(GroupService.class);
-        flowObjectiveStore = context.store();
-        deviceService = serviceDirectory.get(DeviceService.class);
-
-        driverId = coreService.registerApplication(
-                "org.onosproject.driver.CpqdOfdpa2Pipeline");
-
-        initializePipeline();
+    protected boolean requireVlanExtensions() {
+        return false;
     }
 
-    /*
-     * CPQD emulation does not require special untagged packet handling, unlike
-     * the real ofdpa.
+    /**
+     * Determines whether this pipeline support copy ttl instructions or not.
+     *
+     * @return true if copy ttl instructions are supported
      */
+    protected boolean supportCopyTtl() {
+        return true;
+    }
+
+    /**
+     * Determines whether this pipeline support push mpls to vlan-tagged packets or not.
+     * <p>
+     * If not support, pop vlan before push entering unicast and mpls table.
+     * Side effect: HostService learns redundant hosts with same MAC but
+     * different VLAN. No known side effect on the network reachability.
+     *
+     * @return true if push mpls to vlan-tagged packets is supported
+     */
+    protected boolean supportTaggedMpls() {
+        return false;
+    }
+
+    /**
+     * Determines whether this pipeline support punt action in group bucket.
+     *
+     * @return true if punt action in group bucket is supported
+     */
+    protected boolean supportPuntGroup() {
+        return false;
+    }
+
     @Override
-    protected void processFilter(FilteringObjective filt,
-                                 boolean install, ApplicationId applicationId) {
-        // This driver only processes filtering criteria defined with switch
-        // ports as the key
-        PortCriterion portCriterion = null;
-        EthCriterion ethCriterion = null;
-        VlanIdCriterion vidCriterion = null;
-        Collection<IPCriterion> ips = new ArrayList<IPCriterion>();
-        if (!filt.key().equals(Criteria.dummy()) &&
-                filt.key().type() == Criterion.Type.IN_PORT) {
-            portCriterion = (PortCriterion) filt.key();
-        } else {
-            log.warn("No key defined in filtering objective from app: {}. Not"
-                    + "processing filtering objective", applicationId);
-            fail(filt, ObjectiveError.UNKNOWN);
-            return;
-        }
-        // convert filtering conditions for switch-intfs into flowrules
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        for (Criterion criterion : filt.conditions()) {
-            if (criterion.type() == Criterion.Type.ETH_DST ||
-                    criterion.type() == Criterion.Type.ETH_DST_MASKED) {
-                ethCriterion = (EthCriterion) criterion;
-            } else if (criterion.type() == Criterion.Type.VLAN_VID) {
-                vidCriterion = (VlanIdCriterion) criterion;
-            } else if (criterion.type() == Criterion.Type.IPV4_DST) {
-                ips.add((IPCriterion) criterion);
-            } else {
-                log.error("Unsupported filter {}", criterion);
-                fail(filt, ObjectiveError.UNSUPPORTED);
-                return;
-            }
-        }
+    protected void initDriverId() {
+        driverId = coreService.registerApplication(
+                "org.onosproject.driver.CpqdOfdpa2Pipeline");
+    }
 
-        VlanId assignedVlan = null;
-        // For VLAN cross-connect packets, use the configured VLAN
-        if (vidCriterion != null) {
-            if (vidCriterion.vlanId() != VlanId.NONE) {
-                assignedVlan = vidCriterion.vlanId();
-
-            // For untagged packets, assign a VLAN ID
-            } else {
-                if (filt.meta() == null) {
-                    log.error("Missing metadata in filtering objective required " +
-                            "for vlan assignment in dev {}", deviceId);
-                    fail(filt, ObjectiveError.BADPARAMS);
-                    return;
-                }
-                for (Instruction i : filt.meta().allInstructions()) {
-                    if (i instanceof ModVlanIdInstruction) {
-                        assignedVlan = ((ModVlanIdInstruction) i).vlanId();
-                    }
-                }
-                if (assignedVlan == null) {
-                    log.error("Driver requires an assigned vlan-id to tag incoming "
-                            + "untagged packets. Not processing vlan filters on "
-                            + "device {}", deviceId);
-                    fail(filt, ObjectiveError.BADPARAMS);
-                    return;
-                }
-            }
-        }
-
-        if (ethCriterion == null || ethCriterion.mac().equals(MacAddress.NONE)) {
-            log.debug("filtering objective missing dstMac, cannot program TMAC table");
-        } else {
-            for (FlowRule tmacRule : processEthDstFilter(portCriterion, ethCriterion,
-                                                         vidCriterion, assignedVlan,
-                                                         applicationId)) {
-                log.debug("adding MAC filtering rules in TMAC table: {} for dev: {}",
-                          tmacRule, deviceId);
-                ops = install ? ops.add(tmacRule) : ops.remove(tmacRule);
-            }
-        }
-
-        if (ethCriterion == null || vidCriterion == null) {
-            log.debug("filtering objective missing dstMac or VLAN, "
-                    + "cannot program VLAN Table");
-        } else {
-            List<FlowRule> allRules = processVlanIdFilter(
-                    portCriterion, vidCriterion, assignedVlan, applicationId);
-            for (FlowRule rule : allRules) {
-                log.debug("adding VLAN filtering rule in VLAN table: {} for dev: {}",
-                        rule, deviceId);
-                ops = install ? ops.add(rule) : ops.remove(rule);
-            }
-        }
-
-        for (IPCriterion ipaddr : ips) {
-            // since we ignore port information for IP rules, and the same (gateway) IP
-            // can be configured on multiple ports, we make sure that we send
-            // only a single rule to the switch.
-            if (!sentIpFilters.contains(ipaddr)) {
-                sentIpFilters.add(ipaddr);
-                log.debug("adding IP filtering rules in ACL table {} for dev: {}",
-                          ipaddr, deviceId);
-                TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-                TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-                selector.matchEthType(Ethernet.TYPE_IPV4);
-                selector.matchIPDst(ipaddr.ip());
-                treatment.setOutput(PortNumber.CONTROLLER);
-                FlowRule rule = DefaultFlowRule.builder()
-                        .forDevice(deviceId)
-                        .withSelector(selector.build())
-                        .withTreatment(treatment.build())
-                        .withPriority(HIGHEST_PRIORITY)
-                        .fromApp(applicationId)
-                        .makePermanent()
-                        .forTable(ACL_TABLE).build();
-                ops = install ? ops.add(rule) : ops.remove(rule);
-            }
-        }
-
-        // apply filtering flow rules
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Applied {} filtering rules in device {}",
-                         ops.stages().get(0).size(), deviceId);
-                pass(filt);
-            }
-
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to apply all filtering rules in dev {}", deviceId);
-                fail(filt, ObjectiveError.FLOWINSTALLATIONFAILED);
-            }
-        }));
-
+    @Override
+    protected void initGroupHander(PipelinerContext context) {
+        groupHandler = new CpqdOfdpa2GroupHandler();
+        groupHandler.init(deviceId, context);
     }
 
     /*
@@ -258,24 +174,6 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         if (vidCriterion.vlanId() == VlanId.NONE) {
             // untagged packets are assigned vlans
             treatment.pushVlan().setVlanId(assignedVlan);
-
-            // Emulating OFDPA behavior by popping off internal assigned VLAN
-            // before sending to controller
-            TrafficSelector.Builder sbuilder = DefaultTrafficSelector.builder()
-                    .matchEthType(Ethernet.TYPE_ARP)
-                    .matchVlanId(assignedVlan);
-            TrafficTreatment.Builder tbuilder = DefaultTrafficTreatment.builder()
-                    .popVlan()
-                    .punt();
-            FlowRule internalVlan = DefaultFlowRule.builder()
-                    .forDevice(deviceId)
-                    .withSelector(sbuilder.build())
-                    .withTreatment(tbuilder.build())
-                    .withPriority(PacketPriority.CONTROL.priorityValue() + 1)
-                    .fromApp(applicationId)
-                    .makePermanent()
-                    .forTable(ACL_TABLE).build();
-            rules.add(internalVlan);
         }
 
         // ofdpa cannot match on ALL portnumber, so we need to use separate
@@ -292,6 +190,20 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         }
 
         for (PortNumber pnum : portnums) {
+            // NOTE: Emulating OFDPA behavior by popping off internal assigned
+            //       VLAN before sending to controller
+            if (supportPuntGroup() && vidCriterion.vlanId() == VlanId.NONE) {
+                GroupKey groupKey = new DefaultGroupKey(Ofdpa2Pipeline.appKryo.serialize(
+                        POP_VLAN_PUNT_GROUP_ID | (Objects.hash(deviceId) & FOUR_BIT_MASK)));
+                Group group = groupService.getGroup(deviceId, groupKey);
+                if (group != null) {
+                    rules.add(buildPuntTableRule(pnum, assignedVlan));
+                } else {
+                    log.info("popVlanPuntGroup not found in dev:{}", deviceId);
+                    return Collections.emptyList();
+                }
+            }
+
             // create rest of flowrule
             selector.matchInPort(pnum);
             FlowRule rule = DefaultFlowRule.builder()
@@ -306,6 +218,92 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         }
 
         return rules;
+    }
+
+    /**
+     * Creates punt table entry that matches IN_PORT and VLAN_VID and points to
+     * a group that pop vlan and punt.
+     *
+     * @param portNumber port number
+     * @param assignedVlan internally assigned vlan id
+     * @return punt table flow rule
+     */
+    private FlowRule buildPuntTableRule(PortNumber portNumber, VlanId assignedVlan) {
+        TrafficSelector.Builder sbuilder = DefaultTrafficSelector.builder()
+                .matchInPort(portNumber)
+                .matchVlanId(assignedVlan);
+        TrafficTreatment.Builder tbuilder = DefaultTrafficTreatment.builder()
+                .group(new GroupId(POP_VLAN_PUNT_GROUP_ID));
+
+        return DefaultFlowRule.builder()
+                .forDevice(deviceId)
+                .withSelector(sbuilder.build())
+                .withTreatment(tbuilder.build())
+                .withPriority(PacketPriority.CONTROL.priorityValue())
+                .fromApp(driverId)
+                .makePermanent()
+                .forTable(PUNT_TABLE).build();
+    }
+
+    /**
+     * Builds a punt to the controller rule for the arp protocol.
+     * <p>
+     * NOTE: CpqD cannot punt correctly in group bucket. The current impl will
+     *       pop VLAN before sending to controller disregarding whether
+     *       it's an internally assigned VLAN or a natural VLAN.
+     *       Therefore, trunk port is not supported in CpqD.
+     *
+     * @param assignedVlan the internal assigned vlan id
+     * @param applicationId the application id
+     * @return the punt flow rule for the arp
+     */
+    private FlowRule buildArpPunt(VlanId assignedVlan, ApplicationId applicationId) {
+        TrafficSelector.Builder sbuilder = DefaultTrafficSelector.builder()
+                .matchEthType(Ethernet.TYPE_ARP)
+                .matchVlanId(assignedVlan);
+        TrafficTreatment.Builder tbuilder = DefaultTrafficTreatment.builder()
+                .popVlan()
+                .punt();
+
+        return DefaultFlowRule.builder()
+                .forDevice(deviceId)
+                .withSelector(sbuilder.build())
+                .withTreatment(tbuilder.build())
+                .withPriority(PacketPriority.CONTROL.priorityValue() + 1)
+                .fromApp(applicationId)
+                .makePermanent()
+                .forTable(ACL_TABLE).build();
+    }
+
+    /**
+     * Builds a punt to the controller rule for the icmp v6 messages.
+     * <p>
+     * NOTE: CpqD cannot punt correctly in group bucket. The current impl will
+     *       pop VLAN before sending to controller disregarding whether
+     *       it's an internally assigned VLAN or a natural VLAN.
+     *       Therefore, trunk port is not supported in CpqD.
+     *
+     * @param assignedVlan the internal assigned vlan id
+     * @param applicationId the application id
+     * @return the punt flow rule for the icmp v6 messages
+     */
+    private FlowRule buildIcmpV6Punt(VlanId assignedVlan, ApplicationId applicationId) {
+        TrafficSelector.Builder sbuilder = DefaultTrafficSelector.builder()
+                .matchVlanId(assignedVlan)
+                .matchEthType(Ethernet.TYPE_IPV6)
+                .matchIPProtocol(PROTOCOL_ICMP6);
+        TrafficTreatment.Builder tbuilder = DefaultTrafficTreatment.builder()
+                .popVlan()
+                .punt();
+
+        return DefaultFlowRule.builder()
+                .forDevice(deviceId)
+                .withSelector(sbuilder.build())
+                .withTreatment(tbuilder.build())
+                .withPriority(PacketPriority.CONTROL.priorityValue() + 1)
+                .fromApp(applicationId)
+                .makePermanent()
+                .forTable(ACL_TABLE).build();
     }
 
     /*
@@ -350,20 +348,16 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
 
         List<FlowRule> rules = new ArrayList<FlowRule>();
         for (PortNumber pnum : portnums) {
-            // for unicast IP packets
+            // TMAC rules for unicast IP packets
             TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
             TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
             selector.matchInPort(pnum);
             selector.matchVlanId(vidCriterion.vlanId());
             selector.matchEthType(Ethernet.TYPE_IPV4);
             selector.matchEthDst(ethCriterion.mac());
-            /*
-             * Note: CpqD switches do not handle MPLS-related operation properly
-             * for a packet with VLAN tag. We pop VLAN here as a workaround.
-             * Side effect: HostService learns redundant hosts with same MAC but
-             * different VLAN. No known side effect on the network reachability.
-             */
-            treatment.popVlan();
+            if (!supportTaggedMpls()) {
+                treatment.popVlan();
+            }
             treatment.transition(UNICAST_ROUTING_TABLE);
             FlowRule rule = DefaultFlowRule.builder()
                     .forDevice(deviceId)
@@ -374,16 +368,39 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
                     .makePermanent()
                     .forTable(TMAC_TABLE).build();
             rules.add(rule);
-            //for MPLS packets
+
+            // TMAC rules for MPLS packets
             selector = DefaultTrafficSelector.builder();
             treatment = DefaultTrafficTreatment.builder();
             selector.matchInPort(pnum);
             selector.matchVlanId(vidCriterion.vlanId());
             selector.matchEthType(Ethernet.MPLS_UNICAST);
             selector.matchEthDst(ethCriterion.mac());
-            // workaround here again
-            treatment.popVlan();
+            if (!supportTaggedMpls()) {
+                treatment.popVlan();
+            }
             treatment.transition(MPLS_TABLE_0);
+            rule = DefaultFlowRule.builder()
+                    .forDevice(deviceId)
+                    .withSelector(selector.build())
+                    .withTreatment(treatment.build())
+                    .withPriority(DEFAULT_PRIORITY)
+                    .fromApp(applicationId)
+                    .makePermanent()
+                    .forTable(TMAC_TABLE).build();
+            rules.add(rule);
+
+            // TMAC rules for IPv6 packets
+            selector = DefaultTrafficSelector.builder();
+            treatment = DefaultTrafficTreatment.builder();
+            selector.matchInPort(pnum);
+            selector.matchVlanId(vidCriterion.vlanId());
+            selector.matchEthType(Ethernet.TYPE_IPV6);
+            selector.matchEthDst(ethCriterion.mac());
+            if (!supportTaggedMpls()) {
+                treatment.popVlan();
+            }
+            treatment.transition(UNICAST_ROUTING_TABLE);
             rule = DefaultFlowRule.builder()
                     .forDevice(deviceId)
                     .withSelector(selector.build())
@@ -404,13 +421,9 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
         selector.matchEthType(Ethernet.TYPE_IPV4);
         selector.matchEthDst(ethCriterion.mac());
-        /*
-         * Note: CpqD switches do not handle MPLS-related operation properly
-         * for a packet with VLAN tag. We pop VLAN here as a workaround.
-         * Side effect: HostService learns redundant hosts with same MAC but
-         * different VLAN. No known side effect on the network reachability.
-         */
-        treatment.popVlan();
+        if (!supportTaggedMpls()) {
+            treatment.popVlan();
+        }
         treatment.transition(UNICAST_ROUTING_TABLE);
         FlowRule rule = DefaultFlowRule.builder()
                 .forDevice(deviceId)
@@ -436,7 +449,8 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
                 (EthTypeCriterion) selector.getCriterion(Criterion.Type.ETH_TYPE);
         if ((ethType == null) ||
                 (ethType.ethType().toShort() != Ethernet.TYPE_IPV4) &&
-                (ethType.ethType().toShort() != Ethernet.MPLS_UNICAST)) {
+                        (ethType.ethType().toShort() != Ethernet.MPLS_UNICAST) &&
+                        (ethType.ethType().toShort() != Ethernet.TYPE_IPV6)) {
             log.warn("processSpecific: Unsupported forwarding objective criteria"
                     + "ethType:{} in dev:{}", ethType, deviceId);
             fail(fwd, ObjectiveError.UNSUPPORTED);
@@ -477,6 +491,11 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
                 log.debug("processing IPv4 unicast specific forwarding objective {} -> next:{}"
                         + " in dev:{}", fwd.id(), fwd.nextId(), deviceId);
             }
+        } else if (ethType.ethType().toShort() == Ethernet.TYPE_IPV6) {
+            if (buildIpv6Selector(filteredSelector, fwd) < 0) {
+                return Collections.emptyList();
+            }
+            forTableId = UNICAST_ROUTING_TABLE;
         } else {
             filteredSelector
                 .matchEthType(Ethernet.MPLS_UNICAST)
@@ -495,6 +514,13 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         TrafficTreatment.Builder tb = DefaultTrafficTreatment.builder();
         if (fwd.treatment() != null) {
             for (Instruction i : fwd.treatment().allInstructions()) {
+                if (!supportCopyTtl() && i instanceof L3ModificationInstruction) {
+                    L3ModificationInstruction l3instr = (L3ModificationInstruction) i;
+                    if (l3instr.subtype().equals(L3ModificationInstruction.L3SubType.TTL_IN) ||
+                            l3instr.subtype().equals(L3ModificationInstruction.L3SubType.TTL_OUT)) {
+                        continue;
+                    }
+                }
                 /*
                  * NOTE: OF-DPA does not support immediate instruction in
                  * L3 unicast and MPLS table.
@@ -535,19 +561,9 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         Collection<FlowRule> flowRuleCollection = new ArrayList<>();
         flowRuleCollection.add(ruleBuilder.build());
         if (defaultRule) {
-            FlowRule.Builder rule = DefaultFlowRule.builder()
-                .fromApp(fwd.appId())
-                .withPriority(fwd.priority())
-                .forDevice(deviceId)
-                .withSelector(complementarySelector.build())
-                .withTreatment(tb.build())
-                .forTable(forTableId);
-            if (fwd.permanent()) {
-                rule.makePermanent();
-            } else {
-                rule.makeTemporary(fwd.timeout());
-            }
-            flowRuleCollection.add(rule.build());
+            flowRuleCollection.add(
+                    defaultRoute(fwd, complementarySelector, forTableId, tb)
+            );
             log.debug("Default rule 0.0.0.0/0 is being installed two rules");
         }
         return flowRuleCollection;
@@ -574,7 +590,7 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
         TrafficSelector.Builder filteredSelectorBuilder =
                 DefaultTrafficSelector.builder();
         // Do not match MacAddress for subnet broadcast entry
-        if (!ethCriterion.mac().equals(MacAddress.NONE)) {
+        if (!ethCriterion.mac().equals(NONE) && !ethCriterion.mac().equals(BROADCAST)) {
             filteredSelectorBuilder.matchEthDst(ethCriterion.mac());
             log.debug("processing L2 forwarding objective:{} -> next:{} in dev:{}",
                     fwd.id(), fwd.nextId(), deviceId);
@@ -655,6 +671,14 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
             if (criterion instanceof VlanIdCriterion) {
                 // avoid matching on vlans
                 return;
+            } else if (criterion instanceof Icmpv6TypeCriterion ||
+                    criterion instanceof Icmpv6CodeCriterion) {
+                /*
+                 * We silenty discard these criterions, our current
+                 * OFDPA platform does not support these matches on
+                 * the ACL table.
+                 */
+                log.warn("ICMPv6 Type and ICMPv6 Code are not supported");
             } else {
                 sbuilder.add(criterion);
             }
@@ -668,7 +692,7 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
                 if (ins instanceof OutputInstruction) {
                     OutputInstruction o = (OutputInstruction) ins;
                     if (o.port() == PortNumber.CONTROLLER) {
-                        ttBuilder.add(o);
+                        ttBuilder.transition(PUNT_TABLE);
                     } else {
                         log.warn("Only allowed treatments in versatile forwarding "
                                 + "objectives are punts to the controller");
@@ -716,224 +740,94 @@ public class CpqdOfdpa2Pipeline extends Ofdpa2Pipeline {
      */
     @Override
     protected void initializePipeline() {
-        processPortTable();
-        // vlan table processing not required, as default is to drop packets
-        // which can be accomplished without a table-miss-entry.
-        processTmacTable();
-        processIpTable();
-        processMulticastIpTable();
-        processMplsTable();
-        processBridgingTable();
-        processAclTable();
+        initTableMiss(PORT_TABLE, VLAN_TABLE, null);
+        initTableMiss(VLAN_TABLE, ACL_TABLE, null);
+        initTableMiss(TMAC_TABLE, BRIDGING_TABLE, null);
+        initTableMiss(UNICAST_ROUTING_TABLE, ACL_TABLE, null);
+        initTableMiss(MULTICAST_ROUTING_TABLE, ACL_TABLE, null);
+        initTableMiss(MPLS_TABLE_0, MPLS_TABLE_1, null);
+        initTableMiss(MPLS_TABLE_1, ACL_TABLE, null);
+        initTableMiss(BRIDGING_TABLE, ACL_TABLE, null);
+        initTableMiss(ACL_TABLE, -1, null);
+
+        if (supportPuntGroup()) {
+            initTableMiss(PUNT_TABLE, -1,
+                    DefaultTrafficTreatment.builder().punt().build());
+            initPopVlanPuntGroup();
+        } else {
+            initTableMiss(PUNT_TABLE, -1,
+                    DefaultTrafficTreatment.builder().popVlan().punt().build());
+        }
     }
 
-    protected void processPortTable() {
+    /**
+     * Install table-miss flow entry.
+     *
+     * If treatment exists, use it directly.
+     * Else if treatment does not exist but nextTable > 0, transit to next table.
+     * Else apply empty treatment.
+     *
+     * @param thisTable this table ID
+     * @param nextTable next table ID
+     * @param treatment traffic treatment to apply.
+     */
+    private void initTableMiss(int thisTable, int nextTable, TrafficTreatment treatment) {
         FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        treatment.transition(VLAN_TABLE);
-        FlowRule tmisse = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(PORT_TABLE).build();
-        ops = ops.add(tmisse);
+        TrafficSelector selector = DefaultTrafficSelector.builder().build();
 
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized port table");
+        if (treatment == null) {
+            TrafficTreatment.Builder tBuilder = DefaultTrafficTreatment.builder();
+            if (nextTable > 0) {
+                tBuilder.transition(nextTable);
             }
+            treatment = tBuilder.build();
+        }
 
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize port table");
-            }
-        }));
-    }
-
-    protected void processTmacTable() {
-        //table miss entry
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        treatment.transition(BRIDGING_TABLE);
         FlowRule rule = DefaultFlowRule.builder()
                 .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
+                .withSelector(selector)
+                .withTreatment(treatment)
                 .withPriority(LOWEST_PRIORITY)
                 .fromApp(driverId)
                 .makePermanent()
-                .forTable(TMAC_TABLE).build();
+                .forTable(thisTable).build();
         ops =  ops.add(rule);
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized tmac table");
-            }
-
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize tmac table");
-            }
-        }));
-    }
-
-    protected void processIpTable() {
-        //table miss entry
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        treatment.transition(ACL_TABLE);
-        FlowRule rule = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(UNICAST_ROUTING_TABLE).build();
-        ops =  ops.add(rule);
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized IP table");
-            }
-
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize unicast IP table");
-            }
-        }));
-    }
-
-    protected void processMulticastIpTable() {
-        //table miss entry
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        treatment.transition(ACL_TABLE);
-        FlowRule rule = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(MULTICAST_ROUTING_TABLE).build();
-        ops =  ops.add(rule);
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized multicast IP table");
-            }
-
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize multicast IP table");
-            }
-        }));
-    }
-
-    protected void processMplsTable() {
-        //table miss entry
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        selector = DefaultTrafficSelector.builder();
-        treatment = DefaultTrafficTreatment.builder();
-        treatment.transition(MPLS_TABLE_1);
-        FlowRule rule = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(MPLS_TABLE_0).build();
-        ops =  ops.add(rule);
-
-        treatment.transition(ACL_TABLE);
-        rule = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(MPLS_TABLE_1).build();
-        ops = ops.add(rule);
 
         flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
             @Override
             public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized MPLS tables");
+                log.info("Initialized table {} on {}", thisTable, deviceId);
             }
-
             @Override
             public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize MPLS tables");
+                log.warn("Failed to initialize table {} on {}", thisTable, deviceId);
             }
         }));
     }
 
-    private void processBridgingTable() {
-        //table miss entry
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        treatment.transition(ACL_TABLE);
-        FlowRule rule = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(BRIDGING_TABLE).build();
-        ops =  ops.add(rule);
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized Bridging table");
-            }
+    /**
+     * Builds a indirect group contains pop_vlan and punt actions.
+     * <p>
+     * Using group instead of immediate action to ensure that
+     * the copy of packet on the data plane is not affected by the pop vlan action.
+     */
+    private void initPopVlanPuntGroup() {
+        GroupKey groupKey = new DefaultGroupKey(Ofdpa2Pipeline.appKryo.serialize(
+                POP_VLAN_PUNT_GROUP_ID | (Objects.hash(deviceId) & FOUR_BIT_MASK)));
+        TrafficTreatment bucketTreatment = DefaultTrafficTreatment.builder()
+                .popVlan().punt().build();
+        GroupBucket bucket =
+                DefaultGroupBucket.createIndirectGroupBucket(bucketTreatment);
+        GroupDescription groupDesc =
+                new DefaultGroupDescription(
+                        deviceId,
+                        GroupDescription.Type.INDIRECT,
+                        new GroupBuckets(Collections.singletonList(bucket)),
+                        groupKey,
+                        POP_VLAN_PUNT_GROUP_ID,
+                        driverId);
+        groupService.addGroup(groupDesc);
 
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize Bridging table");
-            }
-        }));
+        log.info("Initialized pop vlan punt group on {}", deviceId);
     }
-
-    protected void processAclTable() {
-        //table miss entry - catch all to executed action-set
-        FlowRuleOperations.Builder ops = FlowRuleOperations.builder();
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        TrafficTreatment.Builder treatment = DefaultTrafficTreatment.builder();
-        FlowRule rule = DefaultFlowRule.builder()
-                .forDevice(deviceId)
-                .withSelector(selector.build())
-                .withTreatment(treatment.build())
-                .withPriority(LOWEST_PRIORITY)
-                .fromApp(driverId)
-                .makePermanent()
-                .forTable(ACL_TABLE).build();
-        ops =  ops.add(rule);
-        flowRuleService.apply(ops.build(new FlowRuleOperationsContext() {
-            @Override
-            public void onSuccess(FlowRuleOperations ops) {
-                log.info("Initialized Acl table");
-            }
-
-            @Override
-            public void onError(FlowRuleOperations ops) {
-                log.info("Failed to initialize Acl table");
-            }
-        }));
-    }
-
 }

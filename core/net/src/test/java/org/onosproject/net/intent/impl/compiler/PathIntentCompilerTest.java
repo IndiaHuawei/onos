@@ -65,7 +65,6 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.number.OrderingComparison.greaterThan;
-import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.onosproject.net.DefaultEdgeLink.createEdgeLink;
 import static org.onosproject.net.Link.Type.DIRECT;
@@ -176,6 +175,7 @@ public class PathIntentCompilerTest {
         sut.coreService = coreService;
         sut.resourceService = new MockResourceService();
 
+        Intent.unbindIdGenerator(idGenerator);
         Intent.bindIdGenerator(idGenerator);
 
         intent = PathIntent.builder()
@@ -969,7 +969,6 @@ public class PathIntentCompilerTest {
             VlanId vlanToEncap2 = verifyVlanEncapTreatment(rule2.treatment(), d1p1, true, false);
 
             assertTrue(VlanId.NO_VID < vlanToEncap2.toShort() && vlanToEncap2.toShort() < VlanId.MAX_VLAN);
-            assertNotEquals(vlanToEncap, vlanToEncap2);
 
             sut.deactivate();
 

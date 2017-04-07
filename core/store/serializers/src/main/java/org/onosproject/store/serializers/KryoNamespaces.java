@@ -15,6 +15,7 @@
  */
 package org.onosproject.store.serializers;
 
+import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -48,7 +49,7 @@ import org.onosproject.cluster.RoleInfo;
 import org.onosproject.core.ApplicationRole;
 import org.onosproject.core.DefaultApplication;
 import org.onosproject.core.DefaultApplicationId;
-import org.onosproject.core.DefaultGroupId;
+import org.onosproject.core.GroupId;
 import org.onosproject.core.Version;
 import org.onosproject.event.Change;
 import org.onosproject.incubator.net.domain.IntentDomainId;
@@ -74,6 +75,7 @@ import org.onosproject.net.HostId;
 import org.onosproject.net.HostLocation;
 import org.onosproject.net.Link;
 import org.onosproject.net.LinkKey;
+import org.onosproject.net.MarkerResource;
 import org.onosproject.net.OchPort;
 import org.onosproject.net.OchSignal;
 import org.onosproject.net.OchSignalType;
@@ -85,7 +87,9 @@ import org.onosproject.net.OtuPort;
 import org.onosproject.net.OtuSignalType;
 import org.onosproject.net.Port;
 import org.onosproject.net.PortNumber;
+import org.onosproject.net.ResourceGroup;
 import org.onosproject.net.TributarySlot;
+import org.onosproject.net.behaviour.protection.ProtectedTransportEndpointDescription;
 import org.onosproject.net.device.DefaultDeviceDescription;
 import org.onosproject.net.device.DefaultPortDescription;
 import org.onosproject.net.device.DefaultPortStatistics;
@@ -181,11 +185,14 @@ import org.onosproject.net.intent.OpticalOduIntent;
 import org.onosproject.net.intent.OpticalPathIntent;
 import org.onosproject.net.intent.PathIntent;
 import org.onosproject.net.intent.PointToPointIntent;
+import org.onosproject.net.intent.ProtectedTransportIntent;
+import org.onosproject.net.intent.ProtectionEndpointIntent;
 import org.onosproject.net.intent.SinglePointToMultiPointIntent;
 import org.onosproject.net.intent.constraint.AnnotationConstraint;
 import org.onosproject.net.intent.constraint.BandwidthConstraint;
 import org.onosproject.net.intent.constraint.BooleanConstraint;
 import org.onosproject.net.intent.constraint.EncapsulationConstraint;
+import org.onosproject.net.intent.constraint.HashedPathSelectionConstraint;
 import org.onosproject.net.intent.constraint.LatencyConstraint;
 import org.onosproject.net.intent.constraint.LinkTypeConstraint;
 import org.onosproject.net.intent.constraint.ObstacleConstraint;
@@ -224,6 +231,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -268,6 +276,7 @@ public final class KryoNamespaces {
                       HashSet.class,
                       LinkedHashSet.class
             )
+            .register(HashMultiset.class)
             .register(Maps.immutableEntry("a", "b").getClass())
             .register(new ArraysAsListSerializer(), Arrays.asList().getClass())
             .register(Collections.singletonList(1).getClass())
@@ -464,6 +473,7 @@ public final class KryoNamespaces {
                     ContinuousResourceId.class,
                     ResourceAllocation.class,
                     ResourceConsumerId.class,
+                    ResourceGroup.class,
                     // Constraints
                     BandwidthConstraint.class,
                     LinkTypeConstraint.class,
@@ -483,6 +493,7 @@ public final class KryoNamespaces {
                     DefaultTableStatisticsEntry.class,
                     EncapsulationConstraint.class,
                     EncapsulationType.class,
+                    HashedPathSelectionConstraint.class,
                     // Flow Objectives
                     DefaultForwardingObjective.class,
                     ForwardingObjective.Flag.class,
@@ -525,7 +536,7 @@ public final class KryoNamespaces {
             .register(MapEvent.Type.class)
             .register(SetEvent.class)
             .register(SetEvent.Type.class)
-            .register(DefaultGroupId.class)
+            .register(GroupId.class)
             .register(Annotations.class)
             .register(OmsPort.class)
             .register(OchPort.class)
@@ -555,6 +566,11 @@ public final class KryoNamespaces {
             .register(new ImmutableByteSequenceSerializer(), ImmutableByteSequence.class)
             .register(PathIntent.ProtectionType.class)
             .register(ProtectionConstraint.class)
+            .register(ProtectedTransportEndpointDescription.class)
+            .register(ProtectionEndpointIntent.class)
+            .register(ProtectedTransportIntent.class)
+            .register(MarkerResource.class)
+            .register(new BitSetSerializer(), BitSet.class)
             .build("API");
 
     /**

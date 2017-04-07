@@ -23,59 +23,47 @@
     'use strict';
 
     // Injected Services
-    var $loc, ps, ms, flash, sus, countryFilters;
+    var $log, $loc, ps, ms, flash, sus, t2zs, countryFilters;
 
     // Injected Classes
     var MapSelectionDialog;
 
     // internal state
-    var mapG, zoomLayer, zoomer;
+    var instance, mapG, zoomLayer, zoomer;
 
-    function init(_zoomLayer_, _zoomer_) {
-        zoomLayer = _zoomLayer_;
-        zoomer = _zoomer_;
-        return setUpMap();
+    function init() {
+        this.appendElement('#topo2-background', 'g');
+        zoomLayer = d3.select('#topo2-zoomlayer');
+        zoomer = t2zs.getZoomer();
     }
 
-    function setUpMap() {
-        var prefs = currentMap(),
-            mapId = prefs.mapid,
-            mapFilePath = prefs.mapfilepath,
-            mapScale = prefs.mapscale,
-            loadMap = ms.loadMapInto,
+    // TODO: to be re-worked: map-id, filePath, scale/pan to be passed as params
+    function setUpMap(mapId, mapFilePath, mapScale) {
+
+        var loadMap = ms.loadMapInto,
             promise, cfilter;
 
-        mapG = d3.select('#topo-map');
-
-        if (mapG.empty()) {
-            mapG = zoomLayer.append('g').attr('id', 'topo-map');
-        } else {
-            mapG.each(function (d, i) {
-                d3.selectAll(this.childNodes).remove();
-            });
-        }
+        this.node().selectAll("*").remove();
 
         if (mapFilePath === '*countries') {
             cfilter = countryFilters[mapId] || countryFilters.uk;
             loadMap = ms.loadMapRegionInto;
         }
 
-        promise = loadMap(mapG, mapFilePath, mapId, {
+        promise = loadMap(this.node(), mapFilePath, mapId, {
             countryFilters: cfilter,
-            adjustScale: mapScale,
+            adjustScale: mapScale || 1,
             shading: ''
         });
-
-        if (!ps.getPrefs('topo_prefs').bg) {
-            toggle(false);
-        }
 
         return promise;
     }
 
+    // TODO: deprecated - the layout will tell us which map
+    //   no longer stored in user preferences
     function currentMap() {
         return ps.getPrefs(
-            'topo_mapid',
+            'topo2_mapid',
             {
                 mapid: 'usa',
                 mapscale: 1,
@@ -86,82 +74,68 @@
         );
     }
 
-    function opacifyMap(b) {
-        mapG.transition()
-            .duration(1000)
-            .attr('opacity', b ? 1 : 0);
-    }
-
+    // TODO: deprecated - maps are defined per layout on the server side.
     function setMap(map) {
-        ps.setPrefs('topo_mapid', map);
-        setUpMap();
-        opacifyMap(true);
+        ps.setPrefs('topo2_mapid', map);
+        return setUpMap.bind(this)();
     }
 
-    // TODO: -- START -- Move to dedicated module
-    var prefsState = {};
-
-    function updatePrefsState(what, b) {
-        prefsState[what] = b ? 1 : 0;
-        ps.setPrefs('topo_prefs', prefsState);
-    }
-
-    function _togSvgLayer(x, G, tag, what) {
-        var on = (x === 'keyev') ? !sus.visible(G) : Boolean(x),
-            verb = on ? 'Show' : 'Hide';
-        sus.visible(G, on);
-        updatePrefsState(tag, on);
-
-        if (x === 'keyev') {
-            flash.flash(verb + ' ' + what);
-        }
-
-        return on;
-    }
-    // TODO: -- END -- Move to dedicated module
-
-    function toggle(x) {
-        return _togSvgLayer(x, mapG, 'bg', 'background map');
-    }
-
+    // TODO: deprecated - map selection does not make sense in Topo2
     function openMapSelection() {
+        $log.warn('openMapSelection DISABLED');
 
-        // TODO: Create a view class with extend method
-        MapSelectionDialog.prototype.currentMap = currentMap;
-
-        new MapSelectionDialog({
-            okHandler: function (preferences) {
-                setMap(preferences);
-            }
-        }).open();
+        // MapSelectionDialog.prototype.currentMap = currentMap;
+        //
+        // new MapSelectionDialog({
+        //     okHandler: function (preferences) {
+        //         setMap(preferences);
+        //     }
+        // }).open();
     }
 
     function resetZoom() {
         zoomer.reset();
     }
 
+    function zoomCallback(sc, tr) {
+        // keep the map lines constant width while zooming
+        this.node().style('stroke-width', (2.0 / sc) + 'px');
+    }
+
     angular.module('ovTopo2')
-    .factory('Topo2MapService',
-        ['$location', 'PrefsService', 'MapService', 'FlashService',
-            'SvgUtilService', 'Topo2CountryFilters', 'Topo2MapDialog',
-            function (_$loc_, _ps_, _ms_, _flash_, _sus_, _t2cf_, _t2md_) {
+    .factory('Topo2MapService', [
+        '$log', '$location', 'Topo2ViewController', 'PrefsService',
+        'MapService', 'FlashService', 'SvgUtilService', 'Topo2CountryFilters',
+        'Topo2MapDialog', 'Topo2ZoomService',
 
-                $loc = _$loc_;
-                ps = _ps_;
-                ms = _ms_;
-                flash = _flash_;
-                sus = _sus_;
-                countryFilters = _t2cf_;
-                MapSelectionDialog = _t2md_;
+        function (_$log_, _$loc_, ViewController, _ps_,
+                  _ms_, _flash_, _sus_, _t2cf_,
+                  _t2md_, _t2zs_) {
 
-                return {
-                    init: init,
-                    openMapSelection: openMapSelection,
-                    toggle: toggle,
+            $log = _$log_;
+            $loc = _$loc_;
+            ps = _ps_;
+            ms = _ms_;
+            flash = _flash_;
+            sus = _sus_;
+            countryFilters = _t2cf_;
+            MapSelectionDialog = _t2md_;
+            t2zs = _t2zs_;
 
-                    resetZoom: resetZoom
-                };
-            }
-        ]);
+            var MapLayer = ViewController.extend({
 
+                id: 'topo2-map',
+                displayName: 'Map',
+
+                init: init,
+                setMap: setMap,
+                setUpMap: setUpMap,
+                openMapSelection: openMapSelection,
+                resetZoom: resetZoom,
+                zoomCallback: zoomCallback
+            });
+
+            return instance || new MapLayer();
+        }
+    ]);
 })();

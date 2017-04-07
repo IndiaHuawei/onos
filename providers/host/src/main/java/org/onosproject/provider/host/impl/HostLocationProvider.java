@@ -329,7 +329,7 @@ public class HostLocationProvider extends AbstractProvider implements HostProvid
 
     @Override
     public void triggerProbe(Host host) {
-        log.info("Triggering probe on device {} ", host);
+        //log.info("Triggering probe on device {} ", host);
 
         // FIXME Disabling host probing for now, because sending packets from a
         // broadcast MAC address caused problems when two ONOS networks were
@@ -616,9 +616,7 @@ public class HostLocationProvider extends AbstractProvider implements HostProvid
     // Signals host vanish for all specified hosts.
     private void removeHosts(Set<Host> hosts) {
         for (Host host : hosts) {
-            if (host.providerId().equals(HostLocationProvider.this.id())) {
-                providerService.hostVanished(host.id());
-            }
+            providerService.hostVanished(host.id());
         }
     }
 

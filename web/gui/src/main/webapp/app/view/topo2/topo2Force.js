@@ -23,10 +23,9 @@
     'use strict';
 
     // injected refs
-    var $log,
-        wss;
+    var $log, $loc, wss;
 
-    var t2is, t2rs, t2ls, t2vs, t2bcs;
+    var t2is, t2rs, t2ls, t2vs, t2bcs, t2ss, t2bgs, t2tbs;
     var svg, forceG, uplink, dim, opts, zoomer;
 
     // D3 Selections
@@ -35,123 +34,74 @@
     // ========================== Helper Functions
 
     function init(_svg_, _forceG_, _uplink_, _dim_, _zoomer_, _opts_) {
+
         svg = _svg_;
-        forceG = _forceG_;
         uplink = _uplink_;
         dim = _dim_;
-        opts = _opts_;
         zoomer = _zoomer_;
+        opts = _opts_;
 
-        t2ls.init(svg, forceG, uplink, dim, zoomer, opts);
+
+        t2bgs.init();
+        t2bgs.region = t2rs;
+        t2ls.init(svg, uplink, dim, zoomer, opts);
+        t2bcs.addLayout(t2ls);
+        t2ss.init(svg, zoomer);
+        t2ss.region = t2rs;
+        t2rs.layout = t2ls;
+        t2tbs.init();
+        navToBookmarkedRegion($loc.search().regionId);
     }
 
     function destroy() {
+        t2tbs.destroy();
         $log.debug('Destroy topo force layout');
     }
 
-    // ========================== Temporary Code (to be deleted later)
-
-    function request(dir, rid) {
-        wss.sendEvent('topo2navRegion', {
-            dir: dir,
-            rid: rid
-        });
-    }
-
-    function doTmpCurrentLayout(data) {
-        var topdiv = d3.select('#topo2tmp');
-        var parentRegion = data.parent;
-        var span = topdiv.select('.parentRegion').select('span');
-        span.text(parentRegion || '[no parent]');
-        span.classed('nav-me', Boolean(parentRegion));
-    }
-
-    function doTmpCurrentRegion(data) {
-        var topdiv = d3.select('#topo2tmp');
-        var span = topdiv.select('.thisRegion').select('span');
-        var div;
-
-        span.text(data.id);
-
-        div = topdiv.select('.subRegions').select('div');
-        data.subregions.forEach(function (r) {
-
-            function nav() {
-                request('down', r.id);
-            }
-
-            div.append('p')
-                .classed('nav-me', true)
-                .text(r.id)
-                .on('click', nav);
-        });
-
-        div = topdiv.select('.devices').select('div');
-        data.layerOrder.forEach(function (tag, idx) {
-            var devs = data.devices[idx];
-            devs.forEach(function (d) {
-                div.append('p')
-                    .text('[' + tag + '] ' + d.id);
+    function navToBookmarkedRegion(regionId) {
+        $log.debug('navToBookmarkedRegion:', regionId);
+        if (regionId) {
+            wss.sendEvent('topo2navRegion', {
+                rid: regionId
             });
 
-        });
-
-        div = topdiv.select('.hosts').select('div');
-        data.layerOrder.forEach(function (tag, idx) {
-            var hosts = data.hosts[idx];
-            hosts.forEach(function (h) {
-                div.append('p')
-                    .text('[' + tag + '] ' + h.id);
-            });
-        });
-
-        div = topdiv.select('.links').select('div');
-        var links = data.links;
-        links.forEach(function (lnk) {
-            div.append('p')
-                .text(lnk.id);
-        });
-    }
-
-    function doTmpPeerRegions(data) {
-
+            t2ls.createForceElements();
+            t2ls.transitionDownRegion();
+        }
     }
 
     // ========================== Event Handlers
 
     function allInstances(data) {
         $log.debug('>> topo2AllInstances event:', data);
-        doTmpCurrentLayout(data);
         t2is.allInstances(data);
     }
 
     function currentLayout(data) {
         $log.debug('>> topo2CurrentLayout event:', data);
+        t2rs.clear();
         t2bcs.addBreadcrumb(data.crumbs);
+        t2bgs.addLayout(data);
     }
 
     function currentRegion(data) {
         $log.debug('>> topo2CurrentRegion event:', data);
-        doTmpCurrentRegion(data);
-        t2rs.addRegion(data);
-        t2ls.createForceLayout();
+        t2rs.loaded('regionData', data);
     }
 
     function topo2PeerRegions(data) {
         $log.debug('>> topo2PeerRegions event:', data);
-        doTmpPeerRegions(data);
-    }
-
-    function startDone(data) {
-        $log.debug('>> topo2StartDone event:', data);
+        t2rs.loaded('peers', data.peers);
     }
 
     function modelEvent(data) {
         $log.debug('>> topo2UiModelEvent event:', data);
+
         // TODO: Interpret the event and update our topo model state (if needed)
         // To Decide: Can we assume that the server will only send events
         //    related to objects that we are currently showing?
         //    (e.g. filtered by subregion contents?)
+        t2rs.update(data);
     }
 
     function showMastership(masterId) {
@@ -210,45 +160,56 @@
         update(t2rs.regionLinks());
     }
 
-    function resetAllLocations() {
-        var nodes = t2rs.regionNodes();
+    function resetNodeLocation() {
 
-        angular.forEach(nodes, function (node) {
-            node.resetPosition();
-        });
-
-        t2ls.update();
-        t2ls.tick();
-    }
-
-    function unpin() {
         var hovered = t2rs.filterRegionNodes(function (model) {
             return model.get('hovered');
         });
 
         angular.forEach(hovered, function (model) {
-            model.fixed = false;
-            model.el.classed('fixed', false);
+            model.resetPosition();
         });
     }
 
+    function unpin() {
+
+        var hovered = t2rs.filterRegionNodes(function (model) {
+            return model.get('hovered');
+        });
+
+        angular.forEach(hovered, function (model) {
+            model.fix(false);
+        });
+
+        t2ls.start();
+    }
+
     angular.module('ovTopo2')
-    .factory('Topo2ForceService',
-        ['$log', 'WebSocketService', 'Topo2InstanceService',
+    .factory('Topo2ForceService', [
+        '$log', '$location', 'WebSocketService', 'Topo2InstanceService',
         'Topo2RegionService', 'Topo2LayoutService', 'Topo2ViewService',
-        'Topo2BreadcrumbService', 'Topo2ZoomService',
-        function (_$log_, _wss_, _t2is_, _t2rs_, _t2ls_,
-            _t2vs_, _t2bcs_, zoomService) {
+        'Topo2BreadcrumbService', 'Topo2ZoomService', 'Topo2SelectService',
+        'Topo2BackgroundService', 'Topo2ToolbarService',
+        function (_$log_, _$loc_, _wss_, _t2is_, _t2rs_, _t2ls_,
+            _t2vs_, _t2bcs_, zoomService, _t2ss_, _t2bgs_, _t2tbs_) {
 
             $log = _$log_;
+            $loc = _$loc_;
             wss = _wss_;
             t2is = _t2is_;
             t2rs = _t2rs_;
             t2ls = _t2ls_;
             t2vs = _t2vs_;
             t2bcs = _t2bcs_;
+            t2ss = _t2ss_;
+            t2bgs = _t2bgs_;
+            t2tbs = _t2tbs_;
 
             var onZoom = function () {
+                if (!t2rs.isLoadComplete()) {
+                    return;
+                }
+
                 var nodes = [].concat(
                         t2rs.regionNodes(),
                         t2rs.regionLinks()
@@ -270,7 +231,6 @@
                 topo2AllInstances: allInstances,
                 topo2CurrentLayout: currentLayout,
                 topo2CurrentRegion: currentRegion,
-                topo2StartDone: startDone,
 
                 topo2UiModelEvent: modelEvent,
 
@@ -279,7 +239,7 @@
 
                 updateNodes: updateNodes,
                 updateLinks: updateLinks,
-                resetAllLocations: resetAllLocations,
+                resetNodeLocation: resetNodeLocation,
                 unpin: unpin
             };
         }]);

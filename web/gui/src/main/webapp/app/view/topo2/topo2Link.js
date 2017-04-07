@@ -59,8 +59,6 @@
         var attrs = angular.extend({}, linkPoints, {
             key: this.get('id'),
             class: 'link',
-            srcPort: this.get('srcPort'),
-            tgtPort: this.get('dstPort'),
             position: {
                 x1: 0,
                 y1: 0,
@@ -94,9 +92,10 @@
 
     function linkEndPoints(srcId, dstId) {
 
-        var allNodes = this.region.nodes();
-        var sourceNode = this.region.findNodeById(this, srcId);
-        var targetNode = this.region.findNodeById(this, dstId);
+        var findNodeById = this.region.model.findNodeById.bind(this.region),
+            allNodes = this.region.model.nodes(),
+            sourceNode = findNodeById(this, srcId),
+            targetNode = findNodeById(this, dstId);
 
         if (!sourceNode || !targetNode) {
             $log.error('Node(s) not on map for link:' + srcId + '~' + dstId);
@@ -118,6 +117,11 @@
     function createLinkCollection(data, _region) {
 
         var LinkModel = Model.extend({
+            initialize: function () {
+                this.super = this.constructor.__super__;
+                this.super.initialize.apply(this, arguments);
+                this.createLink();
+            },
             region: _region,
             createLink: createLink,
             linkEndPoints: linkEndPoints,
@@ -157,16 +161,11 @@
                 var data = [],
                     point;
 
-                // angular.forEach(this.collection.models, function (link) {
-                //     link.unenhance();
-                // });
-
-                this.set('enhanced', true);
-
                 if (showPort()) {
+                    this.set('enhanced', true);
                     point = this.locatePortLabel();
                     angular.extend(point, {
-                        id: 'topo-port-tgt',
+                        id: 'topo2-port-tgt',
                         num: this.get('portB')
                     });
                     data.push(point);
@@ -174,18 +173,18 @@
                     if (this.get('portA')) {
                         point = this.locatePortLabel(1);
                         angular.extend(point, {
-                            id: 'topo-port-src',
+                            id: 'topo2-port-src',
                             num: this.get('portA')
                         });
                         data.push(point);
                     }
 
-                    var entering = d3.select('#topo-portLabels')
+                    var entering = d3.select('.topo2-portLabels')
                         .selectAll('.portLabel')
                         .data(data)
                         .enter().append('g')
                         .classed('portLabel', true)
-                        .attr('id', function (d) { return d.id; })
+                        .attr('id', function (d) { return d.id; });
 
                     entering.each(function (d) {
                         var el = d3.select(this),
@@ -210,7 +209,7 @@
             },
             unenhance: function () {
                 this.set('enhanced', false);
-                d3.select('#topo-portLabels').selectAll('.portLabel').remove();
+                d3.select('.topo2-portLabels').selectAll('.portLabel').remove();
             },
             getSelected: function () {
                 return this.collection.filter(function (m) {
@@ -218,24 +217,14 @@
                 });
             },
             select: function () {
-
-                var ev = d3.event;
-
-                // TODO: if single selection clear selected devices, hosts, sub-regions
-                var s = Boolean(this.get('selected'));
-                // Clear all selected Items
-                _.each(this.collection.models, function (m) {
-                    m.set('selected', false);
-                });
-
-                this.set('selected', !s);
-                this.showDetails();
-
+                this.set({ 'selected': true });
                 return this.getSelected();
             },
             deselect: function () {
-                this.set('selected', false);
-                this.set('enhanced', false);
+                this.set({
+                    'selected': false,
+                    'enhanced': false
+                });
             },
             showDetails: function () {
                 var selected = this.getSelected();
@@ -310,12 +299,15 @@
                 }
             },
             setScale: function () {
+
+                if (!this.el) return;
+
                 var width = linkScale(widthRatio) / t2zs.scale();
                 this.el.style('stroke-width', width + 'px');
 
                 var labelScale = labelDim / (labelDim * t2zs.scale());
 
-                d3.select('#topo-portLabels')
+                d3.select('#topo2-portLabels')
                     .selectAll('.portLabel')
                     .selectAll('*')
                     .style('transform', 'scale(' + labelScale + ')');
@@ -325,6 +317,18 @@
                 if (this.get('enhanced')) {
                     this.enhance();
                 }
+            },
+            remove: function () {
+
+                var width = linkScale(widthRatio) / t2zs.scale();
+
+                this.el.transition()
+                    .duration(300)
+                    .attr('stroke', '#ff0000')
+                    .style('stroke-width', width * 4)
+                    .transition()
+                    .delay(1000)
+                    .style('opacity', 0);
             }
         });
 
@@ -340,27 +344,26 @@
     }
 
     angular.module('ovTopo2')
-    .factory('Topo2LinkService',
-        ['$log', 'Topo2Collection', 'Topo2Model',
+    .factory('Topo2LinkService', [
+        '$log', 'Topo2Collection', 'Topo2Model',
         'ThemeService', 'SvgUtilService', 'Topo2ZoomService',
         'Topo2ViewService', 'Topo2LinkPanelService', 'FnService',
-            function (_$log_, _Collection_, _Model_, _ts_, _sus_,
-                _t2zs_, _t2vs_, _t2lps_, _fn_) {
+        function (_$log_, _c_, _Model_, _ts_, _sus_,
+            _t2zs_, _t2vs_, _t2lps_, _fn_) {
 
-                $log = _$log_;
-                ts = _ts_;
-                sus = _sus_;
-                t2zs = _t2zs_;
-                t2vs = _t2vs_;
-                Collection = _Collection_;
-                Model = _Model_;
-                t2lps = _t2lps_;
-                fn = _fn_;
+            $log = _$log_;
+            ts = _ts_;
+            sus = _sus_;
+            t2zs = _t2zs_;
+            t2vs = _t2vs_;
+            Collection = _c_;
+            Model = _Model_;
+            t2lps = _t2lps_;
+            fn = _fn_;
 
-                return {
-                    createLinkCollection: createLinkCollection
-                };
-            }
-        ]);
-
+            return {
+                createLinkCollection: createLinkCollection
+            };
+        }
+    ]);
 })();

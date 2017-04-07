@@ -16,10 +16,10 @@
 
 package org.onosproject.segmentrouting;
 
-import org.onlab.packet.Ip4Prefix;
 import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
 import org.onlab.packet.VlanId;
+import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Host;
 import org.onosproject.net.HostLocation;
@@ -39,7 +39,10 @@ import org.onosproject.segmentrouting.config.SegmentRoutingAppConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Sets;
 import java.util.Set;
+
+import static org.onosproject.segmentrouting.SegmentRoutingManager.INTERNAL_VLAN;
 
 /**
  * Handles host-related events.
@@ -83,29 +86,31 @@ public class HostHandler {
         DeviceId deviceId = location.deviceId();
         PortNumber port = location.port();
         Set<IpAddress> ips = host.ipAddresses();
-        log.debug("Host {}/{} is added at {}:{}", mac, vlanId, deviceId, port);
+        log.info("Host {}/{} is added at {}:{}", mac, vlanId, deviceId, port);
 
         if (accepted(host)) {
             // Populate bridging table entry
-            log.debug("Populate L2 table entry for host {} at {}:{}",
-                    mac, deviceId, port);
+            log.debug("Populating bridging entry for host {}/{} at {}:{}",
+                    mac, vlanId, deviceId, port);
             ForwardingObjective.Builder fob =
-                    hostFwdObjBuilder(deviceId, mac, vlanId, port);
+                    bridgingFwdObjBuilder(deviceId, mac, vlanId, port);
             if (fob == null) {
                 log.warn("Fail to create fwd obj for host {}/{}. Abort.", mac, vlanId);
                 return;
             }
             ObjectiveContext context = new DefaultObjectiveContext(
-                    (objective) -> log.debug("Host rule for {}/{} populated", mac, vlanId),
+                    (objective) -> log.debug("Brigding rule for {}/{} populated",
+                                             mac, vlanId),
                     (objective, error) ->
-                            log.warn("Failed to populate host rule for {}/{}: {}", mac, vlanId, error));
+                            log.warn("Failed to populate bridging rule for {}/{}: {}",
+                                     mac, vlanId, error));
             flowObjectiveService.forward(deviceId, fob.add(context));
 
             ips.forEach(ip -> {
                 // Populate IP table entry
-                if (ip.isIp4() && srManager.deviceConfiguration.inSameSubnet(location, ip)) {
+                if (srManager.deviceConfiguration.inSameSubnet(location, ip)) {
                     srManager.routingRulePopulator.populateRoute(
-                            deviceId, ip.toIpPrefix(), mac, port);
+                            deviceId, ip.toIpPrefix(), mac, vlanId, port);
                 }
             });
         }
@@ -122,12 +127,12 @@ public class HostHandler {
         DeviceId deviceId = location.deviceId();
         PortNumber port = location.port();
         Set<IpAddress> ips = host.ipAddresses();
-        log.debug("Host {}/{} is removed from {}:{}", mac, vlanId, deviceId, port);
+        log.info("Host {}/{} is removed from {}:{}", mac, vlanId, deviceId, port);
 
         if (accepted(host)) {
             // Revoke bridging table entry
             ForwardingObjective.Builder fob =
-                    hostFwdObjBuilder(deviceId, mac, vlanId, port);
+                    bridgingFwdObjBuilder(deviceId, mac, vlanId, port);
             if (fob == null) {
                 log.warn("Fail to create fwd obj for host {}/{}. Abort.", mac, vlanId);
                 return;
@@ -140,9 +145,9 @@ public class HostHandler {
 
             // Revoke IP table entry
             ips.forEach(ip -> {
-                if (ip.isIp4() && srManager.deviceConfiguration.inSameSubnet(location, ip)) {
+                if (srManager.deviceConfiguration.inSameSubnet(location, ip)) {
                     srManager.routingRulePopulator.revokeRoute(
-                            deviceId, ip.toIpPrefix(), mac, port);
+                            deviceId, ip.toIpPrefix(), mac, vlanId, port);
                 }
             });
         }
@@ -159,13 +164,13 @@ public class HostHandler {
         DeviceId newDeviceId = newLocation.deviceId();
         PortNumber newPort = newLocation.port();
         Set<IpAddress> newIps = event.subject().ipAddresses();
-        log.debug("Host {}/{} is moved from {}:{} to {}:{}",
+        log.info("Host {}/{} is moved from {}:{} to {}:{}",
                 mac, vlanId, prevDeviceId, prevPort, newDeviceId, newPort);
 
         if (accepted(event.prevSubject())) {
             // Revoke previous bridging table entry
             ForwardingObjective.Builder prevFob =
-                    hostFwdObjBuilder(prevDeviceId, mac, vlanId, prevPort);
+                    bridgingFwdObjBuilder(prevDeviceId, mac, vlanId, prevPort);
             if (prevFob == null) {
                 log.warn("Fail to create fwd obj for host {}/{}. Abort.", mac, vlanId);
                 return;
@@ -178,9 +183,9 @@ public class HostHandler {
 
             // Revoke previous IP table entry
             prevIps.forEach(ip -> {
-                if (ip.isIp4() && srManager.deviceConfiguration.inSameSubnet(prevLocation, ip)) {
+                if (srManager.deviceConfiguration.inSameSubnet(prevLocation, ip)) {
                     srManager.routingRulePopulator.revokeRoute(
-                            prevDeviceId, ip.toIpPrefix(), mac, prevPort);
+                            prevDeviceId, ip.toIpPrefix(), mac, vlanId, prevPort);
                 }
             });
         }
@@ -188,7 +193,7 @@ public class HostHandler {
         if (accepted(event.subject())) {
             // Populate new bridging table entry
             ForwardingObjective.Builder newFob =
-                    hostFwdObjBuilder(newDeviceId, mac, vlanId, newPort);
+                    bridgingFwdObjBuilder(newDeviceId, mac, vlanId, newPort);
             if (newFob == null) {
                 log.warn("Fail to create fwd obj for host {}/{}. Abort.", mac, vlanId);
                 return;
@@ -201,9 +206,9 @@ public class HostHandler {
 
             // Populate new IP table entry
             newIps.forEach(ip -> {
-                if (ip.isIp4() && srManager.deviceConfiguration.inSameSubnet(newLocation, ip)) {
+                if (srManager.deviceConfiguration.inSameSubnet(newLocation, ip)) {
                     srManager.routingRulePopulator.populateRoute(
-                            newDeviceId, ip.toIpPrefix(), mac, newPort);
+                            newDeviceId, ip.toIpPrefix(), mac, vlanId, newPort);
                 }
             });
         }
@@ -220,77 +225,99 @@ public class HostHandler {
         DeviceId newDeviceId = newLocation.deviceId();
         PortNumber newPort = newLocation.port();
         Set<IpAddress> newIps = event.subject().ipAddresses();
-        log.debug("Host {}/{} is updated", mac, vlanId);
+        log.info("Host {}/{} is updated", mac, vlanId);
 
         if (accepted(event.prevSubject())) {
             // Revoke previous IP table entry
-            prevIps.forEach(ip -> {
-                if (ip.isIp4() && srManager.deviceConfiguration.inSameSubnet(prevLocation, ip)) {
+            Sets.difference(prevIps, newIps).forEach(ip -> {
+                if (srManager.deviceConfiguration.inSameSubnet(prevLocation, ip)) {
+                    log.info("revoking previous IP rule:{}", ip);
                     srManager.routingRulePopulator.revokeRoute(
-                            prevDeviceId, ip.toIpPrefix(), mac, prevPort);
+                            prevDeviceId, ip.toIpPrefix(), mac, vlanId, prevPort);
                 }
             });
         }
 
         if (accepted(event.subject())) {
             // Populate new IP table entry
-            newIps.forEach(ip -> {
-                if (ip.isIp4() && srManager.deviceConfiguration.inSameSubnet(newLocation, ip)) {
+            Sets.difference(newIps, prevIps).forEach(ip -> {
+                if (srManager.deviceConfiguration.inSameSubnet(newLocation, ip)) {
+                    log.info("populating new IP rule:{}", ip);
                     srManager.routingRulePopulator.populateRoute(
-                            newDeviceId, ip.toIpPrefix(), mac, newPort);
+                            newDeviceId, ip.toIpPrefix(), mac, vlanId, newPort);
                 }
             });
         }
     }
 
     /**
-     * Generates the forwarding objective builder for the host rules.
+     * Generates a forwarding objective builder for bridging rules.
+     * <p>
+     * The forwarding objective bridges packets destined to a given MAC to
+     * given port on given device.
      *
      * @param deviceId Device that host attaches to
      * @param mac MAC address of the host
-     * @param vlanId VLAN ID of the host
+     * @param hostVlanId VLAN ID of the host
      * @param outport Port that host attaches to
      * @return Forwarding objective builder
      */
-    private ForwardingObjective.Builder hostFwdObjBuilder(
-            DeviceId deviceId, MacAddress mac, VlanId vlanId,
+    private ForwardingObjective.Builder bridgingFwdObjBuilder(
+            DeviceId deviceId, MacAddress mac, VlanId hostVlanId,
             PortNumber outport) {
-        // Get assigned VLAN for the subnets
-        VlanId outvlan = null;
-        Ip4Prefix subnet = srManager.deviceConfiguration.getPortSubnet(deviceId, outport);
-        if (subnet == null) {
-            outvlan = VlanId.vlanId(SegmentRoutingManager.ASSIGNED_VLAN_NO_SUBNET);
-        } else {
-            outvlan = srManager.getSubnetAssignedVlanId(deviceId, subnet);
-        }
+        ConnectPoint connectPoint = new ConnectPoint(deviceId, outport);
+        VlanId untaggedVlan = srManager.getUntaggedVlanId(connectPoint);
+        Set<VlanId> taggedVlans = srManager.getTaggedVlanId(connectPoint);
+        VlanId nativeVlan = srManager.getNativeVlanId(connectPoint);
 
-        // match rule
+        // Create host selector
         TrafficSelector.Builder sbuilder = DefaultTrafficSelector.builder();
         sbuilder.matchEthDst(mac);
-        /*
-         * Note: for untagged packets, match on the assigned VLAN.
-         *       for tagged packets, match on its incoming VLAN.
-         */
-        if (vlanId.equals(VlanId.NONE)) {
-            sbuilder.matchVlanId(outvlan);
-        } else {
-            sbuilder.matchVlanId(vlanId);
-        }
 
+        // Create host treatment
         TrafficTreatment.Builder tbuilder = DefaultTrafficTreatment.builder();
-        tbuilder.immediate().popVlan();
         tbuilder.immediate().setOutput(outport);
 
-        // for switch pipelines that need it, provide outgoing vlan as metadata
-        TrafficSelector meta = DefaultTrafficSelector.builder()
-                .matchVlanId(outvlan).build();
+        // Create host meta
+        TrafficSelector.Builder mbuilder = DefaultTrafficSelector.builder();
+
+        // Adjust the selector, treatment and meta according to VLAN configuration
+        if (taggedVlans.contains(hostVlanId)) {
+            sbuilder.matchVlanId(hostVlanId);
+            mbuilder.matchVlanId(hostVlanId);
+        } else if (hostVlanId.equals(VlanId.NONE)) {
+            if (untaggedVlan != null) {
+                sbuilder.matchVlanId(untaggedVlan);
+                mbuilder.matchVlanId(untaggedVlan);
+                tbuilder.immediate().popVlan();
+            } else if (nativeVlan != null) {
+                sbuilder.matchVlanId(nativeVlan);
+                mbuilder.matchVlanId(nativeVlan);
+                tbuilder.immediate().popVlan();
+            } else {
+                // TODO: This check is turned off for now since vRouter still assumes that
+                // hosts are internally tagged with INTERNAL_VLAN.
+                // We should turn this back on when we move forward to the bridging CPR approach.
+                //
+                //log.warn("Untagged host {}/{} is not allowed on {} without untagged or native vlan",
+                //        mac, hostVlanId, connectPoint);
+                //return null;
+                sbuilder.matchVlanId(INTERNAL_VLAN);
+                mbuilder.matchVlanId(INTERNAL_VLAN);
+                tbuilder.immediate().popVlan();
+            }
+        } else {
+            log.warn("Tagged host {}/{} is not allowed on {} without VLAN listed in tagged vlan",
+                    mac, hostVlanId, connectPoint);
+            return null;
+        }
 
         // All forwarding is via Groups. Drivers can re-purpose to flow-actions if needed.
         int portNextObjId = srManager.getPortNextObjectiveId(deviceId, outport,
                 tbuilder.build(),
-                meta);
+                mbuilder.build());
         if (portNextObjId == -1) {
-            // warning log will come from getPortNextObjective method
+            // Warning log will come from getPortNextObjective method
             return null;
         }
 

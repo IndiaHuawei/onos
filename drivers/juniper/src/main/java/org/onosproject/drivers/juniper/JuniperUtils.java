@@ -33,6 +33,7 @@ import org.onosproject.net.device.DeviceDescription;
 import org.onosproject.net.device.PortDescription;
 import org.onosproject.net.link.DefaultLinkDescription;
 import org.onosproject.net.link.LinkDescription;
+import org.slf4j.Logger;
 
 import java.util.HashSet;
 import java.util.List;
@@ -45,12 +46,15 @@ import static org.onosproject.net.DefaultAnnotations.Builder;
 import static org.onosproject.net.Device.Type.ROUTER;
 import static org.onosproject.net.Port.Type.COPPER;
 import static org.onosproject.net.PortNumber.portNumber;
+import static org.slf4j.LoggerFactory.getLogger;
 
 /**
  * Utility class for Netconf XML for Juniper.
  * Tested with MX240 junos 14.2
  */
 public final class JuniperUtils {
+
+    private static final Logger log = getLogger(JuniperUtils.class);
 
     public static final String FAILED_CFG = "Failed to retrieve configuration.";
 
@@ -64,7 +68,8 @@ public final class JuniperUtils {
     public static final String REQ_IF_INFO = "<get-interface-information/>";
 
     //helper strings for parsing
-    private static final String LLDP_NBR_INFO = "lldp-neighbors-information";
+    private static final String LLDP_LIST_NBR_INFO = "lldp-neighbors-information";
+    private static final String LLDP_NBR_INFO = "lldp-neighbor-information";
     private static final String SYS_INFO = "system-information";
     private static final String HW_MODEL = "hardware-model";
     private static final String OS_NAME = "os-name";
@@ -172,6 +177,9 @@ public final class JuniperUtils {
                         if (interf.getString(IF_TYPE).contains(ETH) &&
                                 interf.getString(SPEED).contains(MBPS)) {
                             portDescriptions.add(parseDefaultPort(interf));
+                        } else {
+                            log.debug("Ignoring default port candidate {}",
+                                      interf.getString(NAME));
                         }
                     } else if (interf.getString(IF_LO_ENCAP) != null &&
                             !interf.getString(NAME).contains("pfe") &&
@@ -179,6 +187,9 @@ public final class JuniperUtils {
                         portDescriptions.add(parseLogicalPort(interf));
                     } else if (interf.getString(NAME).contains("lo")) {
                         portDescriptions.add(parseLoopback(interf));
+                    } else {
+                        log.debug("Ignoring unknown port {}",
+                                  interf.getString(NAME));
                     }
                 }
             }
@@ -206,7 +217,7 @@ public final class JuniperUtils {
 
     private static DefaultPortDescription parseDefaultPort(HierarchicalConfiguration cfg) {
         PortNumber portNumber = portNumber(cfg.getString(LO_INDEX));
-        boolean enabled = cfg.getString(STATUS).equals("up");
+        boolean enabled = "up".equals(cfg.getString(STATUS));
         int speed = parseInt(cfg.getString(SPEED).replaceAll(MBPS, ""));
 
 
@@ -230,7 +241,7 @@ public final class JuniperUtils {
                 .set("index", index);
         setIpIfPresent(cfg, annotationsBuilder);
 
-        PortNumber portNumber = portNumberFromName(cfg.getString(IF_LO_INDEX), name);
+        PortNumber portNumber = PortNumber.portNumber(index);
 
         boolean enabled = false;
         if (cfg.getString(IF_LO_STATUS) != null) {
@@ -243,18 +254,6 @@ public final class JuniperUtils {
                 COPPER,
                 DEFAULT_PORT_SPEED,
                 annotationsBuilder.build());
-    }
-
-    private static PortNumber portNumberFromName(String ifIndex, String name) {
-        PortNumber portNumber = portNumber(ifIndex);
-        if (name.contains("-")) {
-            String[] splitted = name.split("-");
-            String typeInt = "[" + splitted[0] + "]";
-            String number = splitted[1].replace("/", "");
-            number = "(" + number + ")";
-            portNumber = PortNumber.fromString(typeInt + number);
-        }
-        return portNumber;
     }
 
     private static void setIpIfPresent(HierarchicalConfiguration cfg,
@@ -302,7 +301,7 @@ public final class JuniperUtils {
     public static Set<LinkAbstraction> parseJuniperLldp(HierarchicalConfiguration info) {
         Set<LinkAbstraction> neighbour = new HashSet<>();
         List<HierarchicalConfiguration> subtrees =
-                info.configurationsAt(LLDP_NBR_INFO);
+                info.configurationsAt(LLDP_LIST_NBR_INFO);
         for (HierarchicalConfiguration neighborsInfo : subtrees) {
             List<HierarchicalConfiguration> neighbors =
                     neighborsInfo.configurationsAt(LLDP_NBR_INFO);

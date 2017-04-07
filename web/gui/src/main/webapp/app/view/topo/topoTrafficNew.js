@@ -75,13 +75,8 @@
             },
 
             A: {
-                cb: function () { tts.showAllFlowTraffic(); },
-                tt: 'Monitor all traffic using flow stats',
-                gid: 'm_allTraffic'
-            },
-            Q: {
-                cb: function () { tts.showAllPortTraffic(); },
-                tt: 'Monitor all traffic using port stats',
+                cb: function () { tts.showAllTraffic(); },
+                tt: 'Monitor all traffic',
                 gid: 'm_allTraffic'
             },
             F: {
@@ -111,7 +106,7 @@
             },
 
             _keyOrder: [
-                '0', 'A', 'Q', 'F', 'V', 'leftArrow', 'rightArrow', 'W'
+                '0', 'A', 'F', 'V', 'leftArrow', 'rightArrow', 'W'
             ]
         },
 
@@ -143,10 +138,14 @@
                 tts.requestTrafficForMode(true);
             },
 
-            // intent visualization hook
-            showintent: function (intentData) {
-                $log.debug('^^ trafficOverlay.showintent() ^^');
-                tts.selectIntent(intentData);
+            // intent visualization hooks
+            acceptIntent: function (type) {
+                // accept any intent type except "Protected" intents
+                return (!type.startsWith('Protected'));
+            },
+            showIntent: function (info) {
+                $log.debug('^^ trafficOverlay.showintent() ^^', info);
+                tts.selectIntent(info);
             }
         }
     };

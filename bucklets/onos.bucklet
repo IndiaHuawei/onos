@@ -140,6 +140,8 @@ def osgi_jar(
     resources = NONE,
     resources_root = None,
     tests = None,
+    do_javadocs = True,
+    do_checkstyle = True,
     **kwargs
     ):
 
@@ -188,22 +190,24 @@ def osgi_jar(
   )
 
   ### Checkstyle
-  checkstyle(
-      name = name + '-checkstyle-files',
-      srcs = srcs,
-      jar_target = ':'+ name,
-  )
+  if do_checkstyle:
+      checkstyle(
+          name = name + '-checkstyle-files',
+          srcs = srcs,
+          jar_target = ':'+ name,
+      )
 
-  java_doc(
-       name = name + '-javadoc',
-       title = 'Java Docs',
-       pkgs = [ package_name_root ],
-       paths = [ 'src/main/java' ],
-       srcs = srcs,
-       deps = deps,
-       visibility = visibility,
-       do_it_wrong = False,
-  )
+  if do_javadocs:
+      java_doc(
+           name = name + '-javadoc',
+           title = 'Java Docs',
+           pkgs = [ package_name_root ],
+           paths = [ 'src/main/java' ],
+           srcs = srcs,
+           deps = deps,
+           visibility = visibility,
+           do_it_wrong = False,
+      )
 
   # TODO add project config for intellij
   # project_config(
@@ -313,7 +317,7 @@ def tar_file(
    ):
 
    cmd = ( 'mkdir -p $TMP/%(root_dir)s && '
-           'cp -r $SRCDIR/ $TMP/%(root_dir)s && '
+           'cp -r -L $SRCDIR/* $TMP/%(root_dir)s && '
            'tar -C $TMP -zcf $OUT %(root_dir)s' ) % {
            'root_dir': root if root is not None else name
          }
@@ -325,3 +329,44 @@ def tar_file(
        out = out if out is not None else ( root if root is not None else name ) + '.tar.gz',
        visibility = visibility,
    )
+
+def only_lib_dep_pom(
+    name,
+    src,
+    out,
+    version = ONOS_VERSION,
+    onosGroupId = ONOS_GROUP_ID,
+    visibility = [ 'PUBLIC' ],
+    ):
+
+    cmd = 'grep -v \<module\> ' + src + ' | sed "s#<modules>#<modules><module>lib</module>#" >$OUT'
+
+    genrule(
+        name = name,
+        srcs = [ src ],
+        bash = cmd,
+        out = out,
+        visibility = visibility,
+        maven_coords = onosGroupId + ':onos:pom:' + version,
+    )
+
+def pass_thru_pom(
+    name,
+    src,
+    out,
+    artifactId,
+    version = ONOS_VERSION,
+    onosGroupId = ONOS_GROUP_ID,
+    visibility = [ 'PUBLIC' ],
+    ):
+
+    cmd = 'cp ' + src + ' $OUT'
+
+    genrule(
+        name = name,
+        srcs = [ src ],
+        bash = cmd,
+        out = out,
+        visibility = visibility,
+        maven_coords = onosGroupId + ':' + artifactId + ':pom:' + version,
+    )

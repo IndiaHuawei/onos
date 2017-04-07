@@ -31,7 +31,6 @@ import org.onlab.util.KryoNamespace;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.cluster.ClusterService;
 import org.onosproject.cluster.NodeId;
-import org.onosproject.core.DefaultGroupId;
 import org.onosproject.core.GroupId;
 import org.onosproject.mastership.MastershipService;
 import org.onosproject.net.DeviceId;
@@ -64,6 +63,7 @@ import org.onosproject.store.service.Serializer;
 import org.onosproject.store.service.StorageService;
 import org.onosproject.store.service.Topic;
 import org.onosproject.store.service.Versioned;
+import org.onosproject.store.service.DistributedPrimitive.Status;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 
@@ -85,10 +85,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
+import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 import static org.onlab.util.Tools.get;
 import static org.onlab.util.Tools.groupedThreads;
 import static org.slf4j.LoggerFactory.getLogger;
@@ -109,7 +112,7 @@ public class DistributedGroupStore
     private static final int GC_THRESH = 6;
 
     private final int dummyId = 0xffffffff;
-    private final GroupId dummyGroupId = new DefaultGroupId(dummyId);
+    private final GroupId dummyGroupId = new GroupId(dummyId);
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected ClusterCommunicationService clusterCommunicator;
@@ -126,6 +129,8 @@ public class DistributedGroupStore
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected ComponentConfigService cfgService;
 
+    private ScheduledExecutorService executor;
+    private Consumer<Status> statusChangeListener;
     // Per device group table with (device id + app cookie) as key
     private ConsistentMap<GroupStoreKeyMapKey,
             StoredGroupEntry> groupStoreEntriesByKey = null;
@@ -204,6 +209,16 @@ public class DistributedGroupStore
         log.debug("Current size of groupstorekeymap:{}",
                   groupStoreEntriesByKey.size());
 
+        log.debug("Creating GroupStoreId Map From GroupStoreKey Map");
+        matchGroupEntries();
+        executor = newSingleThreadScheduledExecutor(groupedThreads("onos/group", "store", log));
+        statusChangeListener = status -> {
+            if (status == Status.ACTIVE) {
+                executor.execute(this::matchGroupEntries);
+            }
+        };
+        groupStoreEntriesByKey.addStatusChangeListener(statusChangeListener);
+
         log.debug("Creating Consistent map pendinggroupkeymap");
 
         auditPendingReqQueue = storageService.<GroupStoreKeyMapKey, StoredGroupEntry>consistentMapBuilder()
@@ -249,7 +264,17 @@ public class DistributedGroupStore
         } else {
             return groupTopic;
         }
-    };
+    }
+
+    /**
+     * Updating values of groupEntriesById.
+     */
+    private void matchGroupEntries() {
+        for (Entry<GroupStoreKeyMapKey, StoredGroupEntry> entry : groupStoreEntriesByKey.asJavaMap().entrySet()) {
+            StoredGroupEntry group = entry.getValue();
+            getGroupIdTable(entry.getKey().deviceId()).put(group.id(), group);
+        }
+    }
 
     /**
      * Returns the group store eventual consistent key map.
@@ -361,12 +386,12 @@ public class DistributedGroupStore
         int freeId = groupIdGen.incrementAndGet();
 
         while (true) {
-            Group existing = getGroup(deviceId, new DefaultGroupId(freeId));
+            Group existing = getGroup(deviceId, new GroupId(freeId));
             if (existing == null) {
                 existing = (
                         extraneousGroupEntriesById.get(deviceId) != null) ?
                         extraneousGroupEntriesById.get(deviceId).
-                                get(new DefaultGroupId(freeId)) :
+                                get(new GroupId(freeId)) :
                         null;
             }
             if (existing != null) {
@@ -442,7 +467,7 @@ public class DistributedGroupStore
         if (extraneousMap == null) {
             return null;
         }
-        return extraneousMap.get(new DefaultGroupId(groupId));
+        return extraneousMap.get(new GroupId(groupId));
     }
 
     private Group getMatchingExtraneousGroupbyBuckets(DeviceId deviceId,
@@ -573,12 +598,12 @@ public class DistributedGroupStore
         GroupId id = null;
         if (groupDesc.givenGroupId() == null) {
             // Get a new group identifier
-            id = new DefaultGroupId(getFreeGroupIdValue(groupDesc.deviceId()));
+            id = new GroupId(getFreeGroupIdValue(groupDesc.deviceId()));
         } else {
             // we need to use the identifier passed in by caller, but check if
             // already used
             Group existing = getGroup(groupDesc.deviceId(),
-                                      new DefaultGroupId(groupDesc.givenGroupId()));
+                                      new GroupId(groupDesc.givenGroupId()));
             if (existing != null) {
                 log.warn("Group already exists with the same id: 0x{} in dev:{} "
                                  + "but with different key: {} (request gkey: {})",
@@ -588,7 +613,7 @@ public class DistributedGroupStore
                          groupDesc.appCookie());
                 return;
             }
-            id = new DefaultGroupId(groupDesc.givenGroupId());
+            id = new GroupId(groupDesc.givenGroupId());
         }
         // Create a group entry object
         StoredGroupEntry group = new DefaultGroup(id, groupDesc);
@@ -719,6 +744,10 @@ public class DistributedGroupStore
     private List<GroupBucket> getUpdatedBucketList(Group oldGroup,
                                                    UpdateType type,
                                                    GroupBuckets buckets) {
+        if (type == UpdateType.SET) {
+            return buckets.buckets();
+        }
+
         List<GroupBucket> oldBuckets = oldGroup.buckets().buckets();
         List<GroupBucket> updatedBucketList = new ArrayList<>();
         boolean groupDescUpdated = false;

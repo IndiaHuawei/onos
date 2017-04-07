@@ -25,7 +25,7 @@ import org.onlab.packet.MacAddress;
 import org.onlab.packet.MplsLabel;
 import org.onlab.packet.TpPort;
 import org.onlab.packet.VlanId;
-import org.onosproject.core.DefaultGroupId;
+import org.onosproject.core.GroupId;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Lambda;
 import org.onosproject.net.OduSignalId;
@@ -180,7 +180,7 @@ public class FlowEntryBuilder {
                             .withSelector(buildSelector())
                             .withTreatment(buildTreatment())
                             .withPriority(stat.getPriority())
-                            .makeTemporary(stat.getIdleTimeout())
+                            .withIdleTimeout(stat.getIdleTimeout())
                             .withCookie(stat.getCookie().getValue());
                     if (stat.getVersion() != OFVersion.OF_10) {
                         builder.forTable(stat.getTableId().getValue());
@@ -206,7 +206,7 @@ public class FlowEntryBuilder {
                             .forDevice(deviceId)
                             .withSelector(buildSelector())
                             .withPriority(removed.getPriority())
-                            .makeTemporary(removed.getIdleTimeout())
+                            .withIdleTimeout(removed.getIdleTimeout())
                             .withCookie(removed.getCookie().getValue())
                             .withReason(FlowRule.FlowRemoveReason.parseShort(removed.getReason()));
 
@@ -236,7 +236,7 @@ public class FlowEntryBuilder {
                             .withSelector(buildSelector())
                             .withTreatment(buildTreatment())
                             .withPriority(flowMod.getPriority())
-                            .makeTemporary(flowMod.getIdleTimeout())
+                            .withIdleTimeout(flowMod.getIdleTimeout())
                             .withCookie(flowMod.getCookie().getValue());
                     if (flowMod.getVersion() != OFVersion.OF_10) {
                         builder.forTable(flowMod.getTableId().getValue());
@@ -424,7 +424,7 @@ public class FlowEntryBuilder {
                     break;
                 case GROUP:
                     OFActionGroup group = (OFActionGroup) act;
-                    builder.group(new DefaultGroupId(group.getGroup().getGroupNumber()));
+                    builder.group(new GroupId(group.getGroup().getGroupNumber()));
                     break;
                 case SET_QUEUE:
                     OFActionSetQueue setQueue = (OFActionSetQueue) act;
@@ -813,16 +813,44 @@ public class FlowEntryBuilder {
                 builder.matchIPDst(ip4Prefix);
                 break;
             case TCP_SRC:
-                builder.matchTcpSrc(TpPort.tpPort(match.get(MatchField.TCP_SRC).getPort()));
+                if (match.isPartiallyMasked(MatchField.TCP_SRC)) {
+                    Masked<org.projectfloodlight.openflow.types.TransportPort> maskedPort =
+                            match.getMasked(MatchField.TCP_SRC);
+                    builder.matchTcpSrcMasked(TpPort.tpPort(maskedPort.getValue().getPort()),
+                                              TpPort.tpPort(maskedPort.getMask().getPort()));
+                } else {
+                    builder.matchTcpSrc(TpPort.tpPort(match.get(MatchField.TCP_SRC).getPort()));
+                }
                 break;
             case TCP_DST:
-                builder.matchTcpDst(TpPort.tpPort(match.get(MatchField.TCP_DST).getPort()));
+                if (match.isPartiallyMasked(MatchField.TCP_DST)) {
+                    Masked<org.projectfloodlight.openflow.types.TransportPort> maskedPort =
+                            match.getMasked(MatchField.TCP_DST);
+                    builder.matchTcpDstMasked(TpPort.tpPort(maskedPort.getValue().getPort()),
+                                              TpPort.tpPort(maskedPort.getMask().getPort()));
+                } else {
+                    builder.matchTcpDst(TpPort.tpPort(match.get(MatchField.TCP_DST).getPort()));
+                }
                 break;
             case UDP_SRC:
-                builder.matchUdpSrc(TpPort.tpPort(match.get(MatchField.UDP_SRC).getPort()));
+                if (match.isPartiallyMasked(MatchField.UDP_SRC)) {
+                    Masked<org.projectfloodlight.openflow.types.TransportPort> maskedPort =
+                            match.getMasked(MatchField.UDP_SRC);
+                    builder.matchUdpSrcMasked(TpPort.tpPort(maskedPort.getValue().getPort()),
+                                              TpPort.tpPort(maskedPort.getMask().getPort()));
+                } else {
+                    builder.matchUdpSrc(TpPort.tpPort(match.get(MatchField.UDP_SRC).getPort()));
+                }
                 break;
             case UDP_DST:
-                builder.matchUdpDst(TpPort.tpPort(match.get(MatchField.UDP_DST).getPort()));
+                if (match.isPartiallyMasked(MatchField.UDP_DST)) {
+                    Masked<org.projectfloodlight.openflow.types.TransportPort> maskedPort =
+                            match.getMasked(MatchField.UDP_DST);
+                    builder.matchUdpDstMasked(TpPort.tpPort(maskedPort.getValue().getPort()),
+                                              TpPort.tpPort(maskedPort.getMask().getPort()));
+                } else {
+                    builder.matchUdpDst(TpPort.tpPort(match.get(MatchField.UDP_DST).getPort()));
+                }
                 break;
             case MPLS_LABEL:
                 builder.matchMplsLabel(MplsLabel.mplsLabel((int) match.get(MatchField.MPLS_LABEL)
@@ -832,10 +860,24 @@ public class FlowEntryBuilder {
                 builder.matchMplsBos(match.get(MatchField.MPLS_BOS).getValue());
                 break;
             case SCTP_SRC:
-                builder.matchSctpSrc(TpPort.tpPort(match.get(MatchField.SCTP_SRC).getPort()));
+                if (match.isPartiallyMasked(MatchField.SCTP_SRC)) {
+                    Masked<org.projectfloodlight.openflow.types.TransportPort> maskedPort =
+                            match.getMasked(MatchField.SCTP_SRC);
+                    builder.matchSctpSrcMasked(TpPort.tpPort(maskedPort.getValue().getPort()),
+                                               TpPort.tpPort(maskedPort.getMask().getPort()));
+                } else {
+                    builder.matchSctpSrc(TpPort.tpPort(match.get(MatchField.SCTP_SRC).getPort()));
+                }
                 break;
             case SCTP_DST:
-                builder.matchSctpDst(TpPort.tpPort(match.get(MatchField.SCTP_DST).getPort()));
+                if (match.isPartiallyMasked(MatchField.SCTP_DST)) {
+                    Masked<org.projectfloodlight.openflow.types.TransportPort> maskedPort =
+                            match.getMasked(MatchField.SCTP_DST);
+                    builder.matchSctpDstMasked(TpPort.tpPort(maskedPort.getValue().getPort()),
+                                               TpPort.tpPort(maskedPort.getMask().getPort()));
+                } else {
+                    builder.matchSctpDst(TpPort.tpPort(match.get(MatchField.SCTP_DST).getPort()));
+                }
                 break;
             case ICMPV4_TYPE:
                 byte icmpType = (byte) match.get(MatchField.ICMPV4_TYPE).getType();

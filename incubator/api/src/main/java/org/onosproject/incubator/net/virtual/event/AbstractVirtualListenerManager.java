@@ -15,40 +15,58 @@
  */
 package org.onosproject.incubator.net.virtual.event;
 
+import org.onlab.osgi.ServiceDirectory;
 import org.onosproject.event.Event;
 import org.onosproject.event.EventDeliveryService;
 import org.onosproject.event.EventListener;
+import org.onosproject.event.ListenerRegistry;
 import org.onosproject.event.ListenerService;
 import org.onosproject.incubator.net.virtual.NetworkId;
+import org.onosproject.incubator.net.virtual.VirtualNetworkService;
+import org.onosproject.incubator.net.virtual.VnetService;
 
 /**
  * Basis for virtual event components which need to export listener mechanism.
  */
 public abstract class AbstractVirtualListenerManager
         <E extends Event, L extends EventListener<E>>
-    implements ListenerService<E, L> {
+        implements ListenerService<E, L>, VnetService {
 
     protected final NetworkId networkId;
+    protected final VirtualNetworkService manager;
+    protected final ServiceDirectory serviceDirectory;
 
     protected EventDeliveryService eventDispatcher;
 
-    VirtualListenerRegistryManager listenerManager =
+    private ListenerRegistry<E, L> listenerRegistry;
+
+    private VirtualListenerRegistryManager listenerManager =
             VirtualListenerRegistryManager.getInstance();
 
-    public AbstractVirtualListenerManager(NetworkId networkId) {
+    public AbstractVirtualListenerManager(VirtualNetworkService manager,
+                                          NetworkId networkId,
+                                          Class<? extends Event> eventClass) {
+        this.manager = manager;
         this.networkId = networkId;
+        this.serviceDirectory = manager.getServiceDirectory();
+
+        //Set default event delivery service by default
+        this.eventDispatcher = serviceDirectory.get(EventDeliveryService.class);
+
+        //Initialize and reference to the listener registry
+        this.listenerRegistry = listenerManager.getRegistry(networkId, eventClass);
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void addListener(L listener) {
-        listenerManager.getRegistry(networkId, getEventClass())
-                .addListener(listener);
+        listenerRegistry.addListener(listener);
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void removeListener(L listener) {
-        listenerManager.getRegistry(networkId, getEventClass())
-                .removeListener(listener);
+        listenerRegistry.removeListener(listener);
     }
 
     /**
@@ -66,23 +84,8 @@ public abstract class AbstractVirtualListenerManager
         }
     }
 
-    /**
-     * Returns the class type of parameter type.
-     * More specifically, it returns the class type of event class.
-     *
-     * @return the class type of provider service of the service
-     */
-    private Class getEventClass() {
-        String className = this.getClass().getGenericSuperclass().toString();
-        String pramType = className.split("<")[1].split(",")[0];
-
-        try {
-            return Class.forName(pramType);
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        }
-
-        return null;
+    @Override
+    public NetworkId networkId() {
+        return this.networkId;
     }
-
 }

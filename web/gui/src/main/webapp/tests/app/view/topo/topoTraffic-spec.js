@@ -38,8 +38,7 @@ describe('factory: view/topo/topoTraffic.js', function() {
             'initTraffic',
             'destroyTraffic',
             'cancelTraffic',
-            'showAllFlowTraffic',
-            'showAllPortTraffic',
+            'showAllTraffic',
             'showDeviceLinkFlows',
             'showRelatedIntents',
             'showPrevIntent',
@@ -51,6 +50,7 @@ describe('factory: view/topo/topoTraffic.js', function() {
             'addMultiSourceIntent',
             'removeIntent',
             'resubmitIntent',
+            'removeIntents',
         ])).toBeTruthy();
     });
 

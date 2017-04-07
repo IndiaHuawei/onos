@@ -21,7 +21,7 @@
     <parent>
         <groupId>org.onosproject</groupId>
         <artifactId>onos</artifactId>
-        <version>1.9.0-SNAPSHOT</version>
+        <version>1.10.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>onos-apps</artifactId>
@@ -46,6 +46,7 @@
         <module>reactive-routing</module>
         <module>virtualbng</module>
         <module>bgprouter</module>
+        <module>flowspec-api</module>
         <module>test</module>
         <module>segmentrouting</module>
         <module>kafka-integration</module>
@@ -61,7 +62,6 @@
         <module>pim</module>
         <module>mlb</module>
         <module>pathpainter</module>
-        <module>patchpanel</module>
         <module>drivermatrix</module>
         <module>cpman</module>
         <module>events</module>
@@ -69,11 +69,9 @@
         <module>vpls</module>
         <module>openstacknode</module>
         <module>openstacknetworking</module>
-        <module>openstackinterface</module>
         <module>influxdbmetrics</module>
         <module>gangliametrics</module>
         <module>graphitemetrics</module>
-        <module>xosclient</module>
         <module>scalablegateway</module>
         <module>bmv2-demo</module>
         <module>yms</module>
@@ -83,6 +81,13 @@
         <module>tenbi</module>
         <module>tetunnel</module>
         <module>actn-mdsc</module>
+        <module>config</module>
+        <module>restconf</module>
+        <module>ofagent</module>
+        <module>intentsync</module>
+        <module>mappingmanagement</module>
+        <module>yang</module>
+        <module>network-troubleshoot</module>
     </modules>
 
     <properties>

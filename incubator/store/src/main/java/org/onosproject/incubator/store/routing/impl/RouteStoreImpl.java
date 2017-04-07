@@ -24,11 +24,13 @@ import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.Service;
 import org.onlab.packet.IpAddress;
+import org.onlab.packet.IpPrefix;
 import org.onlab.util.Tools;
 import org.onosproject.cfg.ComponentConfigService;
+import org.onosproject.incubator.net.routing.InternalRouteEvent;
 import org.onosproject.incubator.net.routing.NextHopData;
 import org.onosproject.incubator.net.routing.Route;
-import org.onosproject.incubator.net.routing.RouteEvent;
+import org.onosproject.incubator.net.routing.RouteSet;
 import org.onosproject.incubator.net.routing.RouteStore;
 import org.onosproject.incubator.net.routing.RouteStoreDelegate;
 import org.onosproject.incubator.net.routing.RouteTableId;
@@ -44,13 +46,15 @@ import java.util.Dictionary;
 import java.util.Map;
 import java.util.Set;
 
+import static com.google.common.base.Preconditions.checkState;
+
 /**
  * An implementation of RouteStore that is backed by either LocalRouteStore or
  * DistributedRouteStore according to configuration.
  */
 @Service
 @Component
-public class RouteStoreImpl extends AbstractStore<RouteEvent, RouteStoreDelegate>
+public class RouteStoreImpl extends AbstractStore<InternalRouteEvent, RouteStoreDelegate>
         implements RouteStore {
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
@@ -101,18 +105,40 @@ public class RouteStoreImpl extends AbstractStore<RouteEvent, RouteStoreDelegate
                 }
                 currentRouteStore = new DistributedRouteStore(storageService);
                 ((DistributedRouteStore) currentRouteStore).activate();
+                ((DistributedRouteStore) currentRouteStore).setDelegate(delegate);
             } else {
                 if (currentRouteStore != null) {
                     ((DistributedRouteStore) currentRouteStore).deactivate();
                 }
                 currentRouteStore = new LocalRouteStore();
                 ((LocalRouteStore) currentRouteStore).activate();
+                ((LocalRouteStore) currentRouteStore).setDelegate(delegate);
             }
 
             this.distributed = expectDistributed;
             log.info("Switched to {} route store", distributed ? "distributed" : "local");
         }
 
+    }
+
+    @Override
+    public void setDelegate(RouteStoreDelegate delegate) {
+        checkState(this.delegate == null || this.delegate == delegate,
+                "Store delegate already set");
+        this.delegate = delegate;
+
+        // Set the delegate of underlying route store implementation
+        currentRouteStore.setDelegate(delegate);
+    }
+
+    @Override
+    public void unsetDelegate(RouteStoreDelegate delegate) {
+        if (this.delegate == delegate) {
+            this.delegate = null;
+        }
+
+        // Unset the delegate of underlying route store implementation
+        currentRouteStore.unsetDelegate(delegate);
     }
 
     @Override
@@ -131,7 +157,7 @@ public class RouteStoreImpl extends AbstractStore<RouteEvent, RouteStoreDelegate
     }
 
     @Override
-    public Collection<Route> getRoutes(RouteTableId table) {
+    public Collection<RouteSet> getRoutes(RouteTableId table) {
         return currentRouteStore.getRoutes(table);
     }
 
@@ -143,6 +169,11 @@ public class RouteStoreImpl extends AbstractStore<RouteEvent, RouteStoreDelegate
     @Override
     public Collection<Route> getRoutesForNextHop(IpAddress ip) {
         return currentRouteStore.getRoutesForNextHop(ip);
+    }
+
+    @Override
+    public RouteSet getRoutes(IpPrefix prefix) {
+        return currentRouteStore.getRoutes(prefix);
     }
 
     @Override

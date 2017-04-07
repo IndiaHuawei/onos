@@ -23,16 +23,16 @@
     'use strict';
 
     // constants
-    var idDialog = 'topo-p-dialog',
+    var idDialog = 'topo2-p-dialog',
         opts = {
-            cssCls: 'topo-p'
+            cssCls: 'topo2-p'
         };
 
     // ==========================
 
     angular.module('ovTopo2')
-    .factory('Topo2DialogService',
-        ['DialogService',
+    .factory('Topo2DialogService', [
+        'DialogService',
 
         function (ds) {
             return {

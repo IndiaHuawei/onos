@@ -30,7 +30,7 @@
 
     // configuration
     var id = 'topo2-p-detail',
-        className = 'topo-p',
+        className = 'topo2-p',
         panelOpts = {
             width: 260          // summary and detail panel width
         };
@@ -51,8 +51,8 @@
     }
 
     angular.module('ovTopo2')
-    .factory('Topo2DetailsPanelService',
-    ['Topo2PanelService',
+    .factory('Topo2DetailsPanelService', [
+        'Topo2PanelService',
         function (_ps_) {
 
             Panel = _ps_;

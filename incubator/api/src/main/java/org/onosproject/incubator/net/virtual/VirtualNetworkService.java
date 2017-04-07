@@ -16,15 +16,22 @@
 package org.onosproject.incubator.net.virtual;
 
 import com.google.common.annotations.Beta;
+import org.onlab.osgi.ServiceDirectory;
+import org.onosproject.core.ApplicationId;
+import org.onosproject.event.ListenerService;
 import org.onosproject.net.DeviceId;
 
+import java.util.HashSet;
 import java.util.Set;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * Service for querying virtual network inventory.
  */
 @Beta
-public interface VirtualNetworkService {
+public interface VirtualNetworkService
+        extends ListenerService<VirtualNetworkEvent, VirtualNetworkListener> {
 
     /**
      * The topic used for obtaining globally unique ids.
@@ -81,6 +88,32 @@ public interface VirtualNetworkService {
     Set<VirtualPort> getVirtualPorts(NetworkId networkId, DeviceId deviceId);
 
     /**
+     * Returns list of physical device identifier mapping with the virtual
+     * device in the specified network. The physical devices are specified by
+     * port mapping mechanism.
+     *
+     * @param networkId network identifier
+     * @param virtualDevice the virtual device
+     * @return collection of the specified device's identifier
+     */
+    default Set<DeviceId> getPhysicalDevices(NetworkId networkId,
+                                             VirtualDevice virtualDevice) {
+        checkNotNull(networkId, "Network ID cannot be null");
+        checkNotNull(virtualDevice, "Virtual device cannot be null");
+        Set<VirtualPort> virtualPortSet =
+                getVirtualPorts(networkId, virtualDevice.id());
+        Set<DeviceId> physicalDeviceSet = new HashSet<>();
+
+        virtualPortSet.forEach(virtualPort -> {
+            if (virtualPort.realizedBy() != null) {
+                physicalDeviceSet.add(virtualPort.realizedBy().deviceId());
+            }
+        });
+
+        return physicalDeviceSet;
+    }
+
+    /**
      * Returns implementation of the specified service class for operating
      * in the context of the given network.
      * <p>
@@ -91,6 +124,7 @@ public interface VirtualNetworkService {
      * <li>{@link org.onosproject.net.host.HostService}</li>
      * <li>{@link org.onosproject.net.topology.TopologyService}</li>
      * <li>{@link org.onosproject.net.topology.PathService}</li>
+     * <li>{@link org.onosproject.net.packet.PacketService}</li>
      * <li>{@link org.onosproject.net.flow.FlowRuleService}</li>
      * <li>{@link org.onosproject.net.flowobjective.FlowObjectiveService}</li>
      * <li>{@link org.onosproject.net.intent.IntentService}</li>
@@ -105,4 +139,18 @@ public interface VirtualNetworkService {
      */
     <T> T get(NetworkId networkId, Class<T> serviceClass);
 
+    /**
+     * Returns service directory.
+     *
+     * @return a service directory
+     */
+    ServiceDirectory getServiceDirectory();
+
+    /**
+     * Returns the application identifier for a virtual network.
+     *
+     * @param networkId network identifier
+     * @return an representative application identifier for a virtual network
+     */
+    ApplicationId getVirtualNetworkApplicationId(NetworkId networkId);
 }

@@ -16,7 +16,6 @@
 package org.onosproject.provider.of.group.impl;
 
 import com.google.common.collect.Lists;
-import org.onosproject.core.DefaultGroupId;
 import org.onosproject.core.GroupId;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.PortNumber;
@@ -89,13 +88,13 @@ public class GroupBucketEntryBuilder {
                     break;
                 case SELECT:
                     groupBucket =
-                            DefaultGroupBucket.createSelectGroupBucket(treatment);
+                            DefaultGroupBucket.createSelectGroupBucket(treatment, (short) bucket.getWeight());
                     break;
                 case FF:
                     PortNumber port =
                             PortNumber.portNumber(bucket.getWatchPort().getPortNumber());
                     GroupId groupId =
-                            new DefaultGroupId(bucket.getWatchGroup().getGroupNumber());
+                            new GroupId(bucket.getWatchGroup().getGroupNumber());
                     groupBucket =
                             DefaultGroupBucket.createFailoverGroupBucket(treatment,
                                     port, groupId);
@@ -119,7 +118,7 @@ public class GroupBucketEntryBuilder {
         TrafficTreatment.Builder builder = DefaultTrafficTreatment.builder();
 
         // If this is a drop rule
-        if (actions.size() == 0) {
+        if (actions.isEmpty()) {
             builder.drop();
             return builder.build();
         }

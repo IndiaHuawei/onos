@@ -23,9 +23,12 @@ import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.Service;
 import org.onlab.osgi.DefaultServiceDirectory;
+import org.onlab.osgi.ServiceDirectory;
 import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
 import org.onlab.packet.VlanId;
+import org.onosproject.core.ApplicationId;
+import org.onosproject.core.CoreService;
 import org.onosproject.incubator.net.tunnel.TunnelId;
 import org.onosproject.incubator.net.virtual.DefaultVirtualLink;
 import org.onosproject.incubator.net.virtual.NetworkId;
@@ -43,6 +46,8 @@ import org.onosproject.incubator.net.virtual.VirtualNetworkStore;
 import org.onosproject.incubator.net.virtual.VirtualNetworkStoreDelegate;
 import org.onosproject.incubator.net.virtual.VirtualPort;
 import org.onosproject.incubator.net.virtual.VnetService;
+import org.onosproject.incubator.net.virtual.event.VirtualEvent;
+import org.onosproject.incubator.net.virtual.event.VirtualListenerRegistryManager;
 import org.onosproject.incubator.net.virtual.provider.VirtualNetworkProvider;
 import org.onosproject.incubator.net.virtual.provider.VirtualNetworkProviderRegistry;
 import org.onosproject.incubator.net.virtual.provider.VirtualNetworkProviderService;
@@ -54,12 +59,15 @@ import org.onosproject.net.Link;
 import org.onosproject.net.PortNumber;
 import org.onosproject.net.device.DeviceService;
 import org.onosproject.net.flow.FlowRuleService;
+import org.onosproject.net.flowobjective.FlowObjectiveService;
+import org.onosproject.net.group.GroupService;
 import org.onosproject.net.host.HostService;
 import org.onosproject.net.intent.IntentEvent;
 import org.onosproject.net.intent.IntentListener;
 import org.onosproject.net.intent.IntentService;
 import org.onosproject.net.intent.IntentState;
 import org.onosproject.net.link.LinkService;
+import org.onosproject.net.packet.PacketService;
 import org.onosproject.net.provider.AbstractListenerProviderRegistry;
 import org.onosproject.net.provider.AbstractProviderService;
 import org.onosproject.net.topology.PathService;
@@ -68,6 +76,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -90,16 +99,25 @@ public class VirtualNetworkManager
     private static final String DEVICE_NULL = "Device ID cannot be null";
     private static final String LINK_POINT_NULL = "Link end-point cannot be null";
 
+    private static final String VIRTUAL_NETWORK_APP_ID_STRING =
+            "org.onosproject.virtual-network";
+
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected VirtualNetworkStore store;
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected IntentService intentService;
 
+    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+    protected CoreService coreService;
+
     private final InternalVirtualIntentListener intentListener =
             new InternalVirtualIntentListener();
 
     private VirtualNetworkStoreDelegate delegate = this::post;
+
+    private ServiceDirectory serviceDirectory = new DefaultServiceDirectory();
+    private ApplicationId appId;
 
     // TODO: figure out how to coordinate "implementation" of a virtual network in a cluster
 
@@ -124,9 +142,12 @@ public class VirtualNetworkManager
 
     @Activate
     public void activate() {
-        store.setDelegate(delegate);
         eventDispatcher.addSink(VirtualNetworkEvent.class, listenerRegistry);
+        eventDispatcher.addSink(VirtualEvent.class,
+                                VirtualListenerRegistryManager.getInstance());
+        store.setDelegate(delegate);
         intentService.addListener(intentListener);
+        appId = coreService.registerApplication(VIRTUAL_NETWORK_APP_ID_STRING);
         log.info("Started");
     }
 
@@ -134,6 +155,7 @@ public class VirtualNetworkManager
     public void deactivate() {
         store.unsetDelegate(delegate);
         eventDispatcher.removeSink(VirtualNetworkEvent.class);
+        eventDispatcher.removeSink(VirtualEvent.class);
         intentService.removeListener(intentListener);
         log.info("Stopped");
     }
@@ -294,6 +316,11 @@ public class VirtualNetworkManager
     }
 
     @Override
+    public ServiceDirectory getServiceDirectory() {
+        return serviceDirectory;
+    }
+
+    @Override
     public Set<VirtualNetwork> getVirtualNetworks(TenantId tenantId) {
         checkNotNull(tenantId, TENANT_NULL);
         return store.getNetworks(tenantId);
@@ -337,6 +364,7 @@ public class VirtualNetworkManager
     private final Map<ServiceKey, VnetService> networkServices = Maps.newConcurrentMap();
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> T get(NetworkId networkId, Class<T> serviceClass) {
         checkNotNull(networkId, NETWORK_NULL);
         ServiceKey serviceKey = networkServiceKey(networkId, serviceClass);
@@ -345,6 +373,11 @@ public class VirtualNetworkManager
             service = create(serviceKey);
         }
         return (T) service;
+    }
+
+    @Override
+    public ApplicationId getVirtualNetworkApplicationId(NetworkId networkId) {
+        return appId;
     }
 
     /**
@@ -379,23 +412,28 @@ public class VirtualNetworkManager
     private VnetService create(ServiceKey serviceKey) {
         VirtualNetwork network = getVirtualNetwork(serviceKey.networkId());
         checkNotNull(network, NETWORK_NULL);
+
         VnetService service;
         if (serviceKey.serviceClass.equals(DeviceService.class)) {
-            service = new VirtualNetworkDeviceManager(this, network);
+            service = new VirtualNetworkDeviceManager(this, network.id());
         } else if (serviceKey.serviceClass.equals(LinkService.class)) {
-            service = new VirtualNetworkLinkManager(this, network);
+            service = new VirtualNetworkLinkManager(this, network.id());
         } else if (serviceKey.serviceClass.equals(TopologyService.class)) {
-            service = new VirtualNetworkTopologyManager(this, network);
+            service = new VirtualNetworkTopologyManager(this, network.id());
         } else if (serviceKey.serviceClass.equals(IntentService.class)) {
-            service = new VirtualNetworkIntentManager(
-                    this, network, new DefaultServiceDirectory());
+            service = new VirtualNetworkIntentManager(this, network.id());
         } else if (serviceKey.serviceClass.equals(HostService.class)) {
-            service = new VirtualNetworkHostManager(this, network);
+            service = new VirtualNetworkHostManager(this, network.id());
         } else if (serviceKey.serviceClass.equals(PathService.class)) {
-            service = new VirtualNetworkPathManager(this, network);
+            service = new VirtualNetworkPathManager(this, network.id());
         } else if (serviceKey.serviceClass.equals(FlowRuleService.class)) {
-            service = new VirtualNetworkFlowRuleManager(this, network,
-                                                        new DefaultServiceDirectory());
+            service = new VirtualNetworkFlowRuleManager(this, network.id());
+        } else if (serviceKey.serviceClass.equals(PacketService.class)) {
+            service = new VirtualNetworkPacketManager(this, network.id());
+        } else if (serviceKey.serviceClass.equals(GroupService.class)) {
+            service = new VirtualNetworkGroupManager(this, network.id());
+        } else if (serviceKey.serviceClass.equals(FlowObjectiveService.class)) {
+            service = new VirtualNetworkFlowObjectiveManager(this, network.id());
         } else {
             return null;
         }
@@ -406,7 +444,7 @@ public class VirtualNetworkManager
     /**
      * Service key class.
      */
-    private class ServiceKey {
+    private static class ServiceKey {
         final NetworkId networkId;
         final Class serviceClass;
 
@@ -416,7 +454,7 @@ public class VirtualNetworkManager
          * @param networkId    network identifier
          * @param serviceClass service class
          */
-        public ServiceKey(NetworkId networkId, Class serviceClass) {
+        ServiceKey(NetworkId networkId, Class serviceClass) {
 
             checkNotNull(networkId, NETWORK_NULL);
             this.networkId = networkId;
@@ -439,6 +477,24 @@ public class VirtualNetworkManager
          */
         public Class serviceClass() {
             return serviceClass;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(networkId, serviceClass);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj instanceof ServiceKey) {
+                ServiceKey that = (ServiceKey) obj;
+                return Objects.equals(this.networkId, that.networkId) &&
+                        Objects.equals(this.serviceClass, that.serviceClass);
+            }
+            return false;
         }
     }
 

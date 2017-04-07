@@ -102,7 +102,7 @@ public class CordConfigHandler {
 
         // Do not proceed if agent port doesn't have subnet configured
         Ip4Prefix agentSubnet = srManager.deviceConfiguration
-                .getPortSubnet(agentLocation.deviceId(), agentLocation.port());
+                .getPortIPv4Subnet(agentLocation.deviceId(), agentLocation.port());
         if (agentSubnet == null) {
             log.warn("Agent port does not have subnet configuration. Abort.");
             return;
@@ -115,7 +115,7 @@ public class CordConfigHandler {
         accessAgentData.getOltMacInfo().forEach((connectPoint, macAddress) -> {
             // Do not proceed if olt port has subnet configured
             Ip4Prefix oltSubnet = srManager.deviceConfiguration
-                    .getPortSubnet(connectPoint.deviceId(), connectPoint.port());
+                    .getPortIPv4Subnet(connectPoint.deviceId(), connectPoint.port());
             if (oltSubnet != null) {
                 log.warn("OLT port has subnet configuration. Abort.");
                 return;
@@ -124,7 +124,7 @@ public class CordConfigHandler {
             // Add olt to the subnet of agent
             log.info("push subnet for olt {}", agentSubnet);
             srManager.deviceConfiguration.addSubnet(connectPoint, agentSubnet);
-            srManager.routingRulePopulator.populateRouterMacVlanFilters(connectPoint.deviceId());
+            srManager.routingRulePopulator.populateVlanMacFilters(connectPoint.deviceId());
 
             // Add host information for olt
             log.info("push host info for olt {}", macAddress);
@@ -149,7 +149,7 @@ public class CordConfigHandler {
 
         // Do not proceed if olt port doesn't have subnet configured
         Ip4Prefix agentSubnet = srManager.deviceConfiguration
-                .getPortSubnet(agentLocation.deviceId(), agentLocation.port());
+                .getPortIPv4Subnet(agentLocation.deviceId(), agentLocation.port());
         if (agentSubnet == null) {
             log.warn("Agent port does not have subnet configuration. Abort.");
             return;
@@ -162,7 +162,7 @@ public class CordConfigHandler {
         accessAgentData.getOltMacInfo().forEach((connectPoint, macAddress) -> {
             // Do not proceed if agent port doesn't have subnet configured
             Ip4Prefix oltSubnet = srManager.deviceConfiguration
-                    .getPortSubnet(connectPoint.deviceId(), connectPoint.port());
+                    .getPortIPv4Subnet(connectPoint.deviceId(), connectPoint.port());
             if (oltSubnet == null) {
                 log.warn("OLT port does not have subnet configuration. Abort.");
                 return;
@@ -175,7 +175,7 @@ public class CordConfigHandler {
             // Remove olt to the subnet of agent
             log.info("delete subnet for olt {}", agentSubnet);
             srManager.deviceConfiguration.removeSubnet(connectPoint, agentSubnet);
-            srManager.routingRulePopulator.populateRouterMacVlanFilters(connectPoint.deviceId());
+            srManager.routingRulePopulator.populateVlanMacFilters(connectPoint.deviceId());
         });
     }
 

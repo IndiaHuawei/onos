@@ -108,9 +108,29 @@
         $log.debug(tos + 'registered overlay: ' + id, overlay);
     }
 
-    // returns the list of overlay identifiers
+    // Returns the list of overlay identifiers.
     function list() {
         return d3.map(overlays).keys();
+    }
+
+    // Returns an array containing overlays that implement the showIntent and
+    // acceptIntent callbacks, and that accept the given intent type
+    function overlaysAcceptingIntents(intentType) {
+        var result = [];
+        angular.forEach(overlays, function (ov) {
+            var ovid = ov.overlayId,
+                hooks = fs.isO(ov.hooks) || {},
+                aicb = fs.isF(hooks.acceptIntent),
+                sicb = fs.isF(hooks.showIntent);
+
+            if (sicb && aicb && aicb(intentType)) {
+                result.push({
+                    id: ovid,
+                    tt: ov.tooltip || '%' + ovid + '%'
+                });
+            }
+        });
+        return result;
     }
 
     // add a radio button for each registered overlay
@@ -286,8 +306,7 @@
 
     // Request from Intent View to visualize an intent on the topo view
     function showIntentHook(intentData) {
-        $log.debug('^^ topoOverlay.showIntentHook(...) ^^');
-        var cb = _hook('showintent');
+        var cb = _hook('showIntent');
         return cb && cb(intentData);
     }
 
@@ -374,32 +393,15 @@
         });
 
         data.links.forEach(function (link) {
-            var ldata = api.findLinkById(link.id),
-                lab = link.label,
-                units, portcls, magnitude;
+            var ldata = api.findLinkById(link.id);
 
             if (ldata && ldata.el && !ldata.el.empty()) {
                 if (!link.subdue) {
                     api.unsupLink(ldata.key, less);
                 }
                 ldata.el.classed(link.css, true);
-                ldata.label = lab;
+                ldata.label = link.label;
 
-                // TODO: this needs to be pulled out into traffic overlay
-                // inject additional styling for port-based traffic
-                if (fs.endsWith(lab, 'bps')) {
-                    units = lab.substring(lab.length-4);
-                    portcls = 'port-traffic-' + units;
-
-                    // for GBps
-                    if (units.substring(0,1) === 'G') {
-                        magnitude = fs.parseBitRate(lab);
-                        if (magnitude >= 9) {
-                            portcls += '-choked'
-                        }
-                    }
-                    ldata.el.classed(portcls, true);
-                }
             } else {
                 $log.warn('HILITE: no link element:', link.id);
             }
@@ -429,6 +431,7 @@
                 register: register,
                 setApi: setApi,
                 list: list,
+                overlaysAcceptingIntents: overlaysAcceptingIntents,
                 augmentRbset: augmentRbset,
                 mkGlyphId: mkGlyphId,
                 tbSelection: tbSelection,

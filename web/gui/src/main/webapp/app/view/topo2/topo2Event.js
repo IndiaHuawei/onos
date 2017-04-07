@@ -33,7 +33,6 @@
     var handlerMap,
         openListener;
 
-    // TODO: only add heartbeat timer etc. if we really need to be doing that..
     // ========================== Helper Functions
 
     function createHandlerMap() {
@@ -42,7 +41,6 @@
             topo2CurrentLayout: t2fs,
             topo2CurrentRegion: t2fs,
             topo2PeerRegions: t2fs,
-            topo2StartDone: t2fs,
 
             topo2UiModelEvent: t2fs
 
@@ -84,8 +82,8 @@
     // ========================== Main Service Definition
 
     angular.module('ovTopo2')
-    .factory('Topo2EventService',
-        ['$log', 'WebSocketService', 'Topo2ForceService',
+    .factory('Topo2EventService', [
+        '$log', 'WebSocketService', 'Topo2ForceService',
 
         function (_$log_, _wss_, _t2fs_) {
             $log = _$log_;
